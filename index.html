@@ -296,6 +296,35 @@ select{cursor:pointer}
 #mode-btn{position:relative}
 #mode-btn.scroll-mode{border-color:var(--amber);color:var(--amber);background:var(--amber-a15)}
 
+/* ── SEEKBAR ── */
+#seekbar{
+  display:none;align-items:center;gap:8px;
+  padding:5px 12px;background:var(--bg2);
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+#seekbar.visible{display:flex}
+.sk-t{
+  font-family:'Courier New',monospace;font-size:11px;
+  color:var(--text2);white-space:nowrap;min-width:42px;
+}
+#sk-track{
+  flex:1;height:22px;position:relative;
+  background:var(--bg3);border-radius:11px;cursor:pointer;
+  border:1px solid var(--border2);
+}
+#sk-fill{
+  height:100%;background:var(--teal2);
+  border-radius:11px;pointer-events:none;width:0%;
+}
+#sk-thumb{
+  position:absolute;top:50%;transform:translate(-50%,-50%);
+  width:20px;height:20px;border-radius:50%;
+  background:var(--teal);border:2px solid #fff;
+  cursor:grab;left:0%;box-shadow:0 1px 5px rgba(0,0,0,.5);
+  touch-action:none;z-index:2;
+}
+#sk-thumb:active{cursor:grabbing;background:var(--teal-light, #3fd89a)}
+
 /* ── LONG PRESS TOOLTIP ── */
 #lp-toast{
   position:fixed;bottom:calc(50vh);left:50%;transform:translateX(-50%);
@@ -371,6 +400,12 @@ select{cursor:pointer}
   .pre{padding:7px 11px;font-size:12px;min-height:36px}
   .abtn{padding:10px 14px;min-height:44px;font-size:12px;border-radius:8px}
 
+  /* Seekbar */
+  #seekbar{padding:5px 8px;gap:6px}
+  #sk-track{height:28px}
+  #sk-thumb{width:26px;height:26px}
+  .sk-t{font-size:12px;min-width:46px}
+
   /* Export */
   .exp-card{padding:12px}
   .exp-card h3{font-size:14px}
@@ -422,6 +457,16 @@ select{cursor:pointer}
       <span id="time-badge" class="under">-</span>
     </div>
     <div id="prog-track"><div id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <!-- Seekbar (appears after first render) -->
+  <div id="seekbar">
+    <span class="sk-t" id="sk-pos">0:00.0</span>
+    <div id="sk-track" onmousedown="skDown(event)" ontouchstart="skDown(event)">
+      <div id="sk-fill"></div>
+      <div id="sk-thumb"></div>
+    </div>
+    <span class="sk-t" id="sk-end" style="text-align:right">--:--.-</span>
   </div>
 
   <!-- Waveform -->
@@ -566,6 +611,8 @@ let looping = false;
 
 // Drag
 let drag = null;
+let tapStart = null;   // {x, time} — tap vs drag 判定用
+let skDragging = false;
 // drag = {mode:'new', t0, t1}
 // drag = {mode:'rs'|'re', si, startX}  (resize start|end of segment si)
 
@@ -737,12 +784,17 @@ function t2px(t) {
 function clampT(t) { return Math.max(0, Math.min(abuf ? abuf.duration : 0, t)); }
 
 // Hit test: returns {mode, si} or {mode:'new'}
+// mode: 'rs'=左端リサイズ 're'=右端リサイズ 'mv'=区間移動 'new'=新規作成
 // tol: override tolerance (optional); auto-detects touch vs mouse
 function hitTest(x, tol) {
   const TOL = tol ?? (navigator.maxTouchPoints > 0 ? 18 : 9);
   for (let i = 0; i < segs.length; i++) {
-    if (Math.abs(x - t2px(segs[i].s)) <= TOL) return {mode:'rs', si:i};
-    if (Math.abs(x - t2px(segs[i].e)) <= TOL) return {mode:'re', si:i};
+    const x1 = t2px(segs[i].s);
+    const x2 = t2px(segs[i].e);
+    if (Math.abs(x - x1) <= TOL) return {mode:'rs', si:i};
+    if (Math.abs(x - x2) <= TOL) return {mode:'re', si:i};
+    // 区間の内側 → 移動モード（端のTOLより内側のみ）
+    if (x > x1 + TOL && x < x2 - TOL) return {mode:'mv', si:i};
   }
   return {mode:'new'};
 }
@@ -1016,8 +1068,16 @@ function wfDown(e) {
   const x = getX(e);
   const t = clampT(px2t(x));
   const ht = hitTest(x);
-  drag = ht.mode === 'new' ? {mode:'new', t0:t, t1:t}
-                            : {mode:ht.mode, si:ht.si, startX:x};
+  tapStart = {x, time: Date.now()};
+
+  if (ht.mode === 'new') {
+    drag = {mode:'new', t0:t, t1:t};
+  } else if (ht.mode === 'mv') {
+    drag = {mode:'mv', si:ht.si, startT:t, origS:segs[ht.si].s, origE:segs[ht.si].e};
+    wfCv.style.cursor = 'grabbing';
+  } else {
+    drag = {mode:ht.mode, si:ht.si, startX:x};
+  }
 }
 
 function wfMove(e) {
@@ -1028,14 +1088,25 @@ function wfMove(e) {
 
   if (!drag) {
     const ht = hitTest(x);
-    wfCv.style.cursor = ht.mode!=='new' ? 'ew-resize' : 'crosshair';
+    if      (ht.mode === 'mv')  wfCv.style.cursor = 'grab';
+    else if (ht.mode !== 'new') wfCv.style.cursor = 'ew-resize';
+    else                        wfCv.style.cursor = 'crosshair';
     drawWF(); return;
   }
 
   if (drag.mode === 'new') {
     drag.t1 = t;
+  } else if (drag.mode === 'mv') {
+    // 区間全体を平行移動（sortMergeはmouseup時のみ）
+    const delta = t - drag.startT;
+    const dur   = drag.origE - drag.origS;
+    const newS  = Math.max(0, Math.min(abuf.duration - dur, drag.origS + delta));
+    segs[drag.si].s = newS;
+    segs[drag.si].e = newS + dur;
+    playBuf = null;
+    updateSL(); updateTD();
   } else {
-    // Resize
+    // リサイズ
     const sg = segs[drag.si];
     if (drag.mode === 'rs') {
       segs[drag.si].s = Math.min(t, sg.e - 0.05);
@@ -1049,13 +1120,32 @@ function wfMove(e) {
 }
 
 function wfUp(e) {
-  if (!drag) return;
+  if (!drag) { tapStart = null; return; }
+
+  const x = getX(e);
+  wfCv.style.cursor = 'crosshair';
+
   if (drag.mode === 'new') {
-    const s = Math.min(drag.t0, drag.t1);
+    const s  = Math.min(drag.t0, drag.t1);
     const en = Math.max(drag.t0, drag.t1);
-    if (en - s > 0.08) addSeg(s, en);
+    // タップ判定：移動 < 6px かつ 時間 < 350ms → シーク
+    const moved   = tapStart ? Math.abs(x - tapStart.x) : 99;
+    const elapsed = tapStart ? Date.now() - tapStart.time : 999;
+    if (moved < 6 && elapsed < 350) {
+      seekTo(clampT(px2t(x)));
+    } else if (en - s > 0.08) {
+      addSeg(s, en);
+    }
+  } else if (drag.mode === 'mv') {
+    // 移動確定：重複があればマージ
+    sortMerge(); rebuildJuncs(); playBuf = null;
+    updateSL(); updateTD(); updateJP();
   }
-  drag = null; drawWF();
+  // rs/re は wfMove 中に sortMerge 済み
+
+  tapStart = null;
+  drag = null;
+  drawWF();
 }
 
 function wfLeave() {
@@ -1144,10 +1234,13 @@ function wfTouchStart(e) {
   // Check handle hit with wider tolerance for touch
   const ht = hitTest(tx, 22);
   if (ht.mode !== 'new') {
-    // Resize mode: start immediately
     const t = clampT(px2t(tx));
-    drag = {mode: ht.mode, si: ht.si, startX: tx};
-    return;
+    if (ht.mode === 'mv') {
+      drag = {mode:'mv', si:ht.si, startT:t, origS:segs[ht.si].s, origE:segs[ht.si].e};
+    } else {
+      drag = {mode: ht.mode, si: ht.si, startX: tx};
+    }
+    clearLP(); return;
   }
 
   // Potential new segment — arm long-press for delete
@@ -1297,6 +1390,114 @@ function outDur() {
 }
 
 // ════════════════════════════════════════════
+//  SEEK
+// ════════════════════════════════════════════
+
+// ソース時刻 → ミックス出力時刻に変換
+function srcToMixTime(srcT) {
+  if (!segs.length) return 0;
+  let mixT = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const segD = segs[i].e - segs[i].s;
+    const xfD  = (i < juncs.length && juncs[i].type !== 'cut') ? juncs[i].ms/1000 : 0;
+    if (srcT >= segs[i].s && srcT <= segs[i].e) {
+      return mixT + (srcT - segs[i].s);
+    }
+    // 区間間のギャップ → 次区間の先頭にジャンプ
+    if (i < segs.length-1 && srcT > segs[i].e && srcT < segs[i+1].s) {
+      return mixT + segD - xfD;
+    }
+    mixT += segD - xfD;
+  }
+  if (srcT < segs[0].s) return 0;
+  return mixT; // 最終区間以降
+}
+
+// シーク（停止中・再生中どちらでも可）
+async function seekTo(srcT) {
+  if (!segs.length) return;
+  await ensureCtx();
+
+  if (!playBuf) {
+    showOv('レンダリング中...');
+    try { playBuf = await renderMix(); } catch(err) { hideOv(); return; }
+    hideOv();
+  }
+
+  playOff = Math.max(0, Math.min(playBuf.duration, srcToMixTime(srcT)));
+
+  if (playing) {
+    // 再生中なら即座に新しい位置から再開
+    if (playSrc) { playSrc.onended=null; try{playSrc.stop();}catch(er){} }
+    playSrc = actx.createBufferSource();
+    playSrc.buffer = playBuf;
+    playSrc.connect(actx.destination);
+    playSrc.onended = () => { if(playing){ playing=false; playOff=0; updPlayUI(); updateSK(); } };
+    playAt = actx.currentTime;
+    playSrc.start(0, playOff);
+  }
+
+  showSK(); updateSK(); drawWF();
+}
+
+// シークバー表示
+function showSK() {
+  const sb = document.getElementById('seekbar');
+  sb.classList.add('visible');
+  if (playBuf) document.getElementById('sk-end').textContent = fmtTP(playBuf.duration);
+}
+
+// シークバー更新（アニメーションループから毎フレーム呼ぶ）
+function updateSK() {
+  if (!playBuf) return;
+  const cur = playing
+    ? Math.min(playBuf.duration, (actx.currentTime - playAt) + playOff)
+    : playOff;
+  const pct = playBuf.duration > 0 ? (cur / playBuf.duration) * 100 : 0;
+  document.getElementById('sk-pos').textContent = fmtTP(cur);
+  document.getElementById('sk-fill').style.width = pct + '%';
+  document.getElementById('sk-thumb').style.left = pct + '%';
+}
+
+// シークバー操作
+function skDown(e) {
+  e.preventDefault(); e.stopPropagation();
+  skDragging = true;
+  skApply(e);
+  const onMove = ev => { ev.preventDefault(); if(skDragging) skApply(ev); };
+  const onUp   = () => {
+    skDragging = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup',   onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend',  onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup',   onUp);
+  document.addEventListener('touchmove', onMove, {passive:false});
+  document.addEventListener('touchend',  onUp);
+}
+
+function skApply(e) {
+  if (!playBuf) return;
+  const r  = document.getElementById('sk-track').getBoundingClientRect();
+  const cx = e.touches ? e.touches[0].clientX : e.clientX;
+  const frac = Math.max(0, Math.min(1, (cx - r.left) / r.width));
+  playOff    = frac * playBuf.duration;
+
+  if (playing) {
+    if (playSrc) { playSrc.onended=null; try{playSrc.stop();}catch(er){} }
+    playSrc = actx.createBufferSource();
+    playSrc.buffer = playBuf;
+    playSrc.connect(actx.destination);
+    playSrc.onended = () => { if(playing){ playing=false; playOff=0; updPlayUI(); updateSK(); } };
+    playAt = actx.currentTime;
+    playSrc.start(0, playOff);
+  }
+  updateSK(); drawWF();
+}
+
+// ════════════════════════════════════════════
 //  AUDIO RENDERING
 // ════════════════════════════════════════════
 async function renderMix() {
@@ -1403,12 +1604,13 @@ async function togglePlay() {
     try { playBuf = await renderMix(); } catch(e) { hideOv(); alert('エラー: '+e.message); return; }
     hideOv();
   }
+  showSK(); // シークバーを表示
 
   if (playSrc) { try { playSrc.stop(); } catch(e){} playSrc.disconnect(); }
   playSrc = actx.createBufferSource();
   playSrc.buffer = playBuf;
   playSrc.connect(actx.destination);
-  playSrc.onended = () => { if(playing){ playing=false; playOff=0; updPlayUI(); } };
+  playSrc.onended = () => { if(playing){ playing=false; playOff=0; updPlayUI(); updateSK(); } };
 
   playOff = Math.min(playOff, playBuf.duration);
   playAt  = actx.currentTime;
@@ -1416,11 +1618,11 @@ async function togglePlay() {
   playing = true;
   updPlayUI();
 
-  // Animate playhead
+  // アニメーションループ（プレイヘッド + シークバー）
   cancelAnimationFrame(playAnimId);
   (function loop() {
     if (!playing) return;
-    drawWF(); updPlayUI();
+    drawWF(); updPlayUI(); updateSK();
     playAnimId = requestAnimationFrame(loop);
   })();
 }
