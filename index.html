@@ -296,6 +296,15 @@ select{cursor:pointer}
 #mode-btn{position:relative}
 #mode-btn.scroll-mode{border-color:var(--amber);color:var(--amber);background:var(--amber-a15)}
 
+/* ── LOOP ライブ更新インジケーター ── */
+.loop-on{border-color:var(--teal) !important;color:var(--teal) !important}
+.loop-on .loop-dot{
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--red);margin-right:5px;vertical-align:middle;
+  animation:lpulse 1s ease-in-out infinite;
+}
+@keyframes lpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.7)}}
+
 /* ── SEEKBAR ── */
 #seekbar{
   display:none;align-items:center;gap:8px;
@@ -1826,32 +1835,75 @@ async function previewSeg(i) {
 // ════════════════════════════════════════════
 //  LOOP (JUNCTION PREVIEW)
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+//  LOOP（継ぎ目ライブ試聴）
+//  ループ再生終了ごとに最新状態で再レンダリング。
+//  再生中に次のバッファを先行生成（ダブルバッファ）して
+//  ループ間のギャップを最小化する。
+// ════════════════════════════════════════════
+
 async function toggleLoop() {
   if (looping) { stopLoop(); return; }
   if (segs.length < 2) { alert('区間が2つ以上必要です'); return; }
   await ensureCtx(); stopAll();
-  showOv('継ぎ目プレビューを生成中...');
-  let lb;
-  try { lb = await renderJunctionPreview(aJunc); } catch(e) { hideOv(); alert('エラー: '+e.message); return; }
-  hideOv();
-  looping = true;
-  document.getElementById('btn-loop').classList.add('loop-on');
 
-  function playOnce() {
-    if (!looping) return;
-    loopSrc = actx.createBufferSource();
-    loopSrc.buffer = lb; loopSrc.connect(actx.destination);
-    loopSrc.onended = playOnce;
-    loopSrc.start();
+  looping = true;
+  updLoopBtn();
+  doLoopCycle(null); // 初回：prefetch なし
+}
+
+// ダブルバッファループサイクル
+// prefetchedBuf: 前サイクル中に先行レンダリングしたバッファ（nullなら今からレンダリング）
+async function doLoopCycle(prefetchedBuf) {
+  if (!looping) return;
+  if (segs.length < 2) { stopLoop(); return; }
+
+  // バッファを取得（先行レンダリング済みのものを使うか、今からレンダリング）
+  let buf = prefetchedBuf;
+  if (!buf) {
+    try { buf = await renderJunctionPreview(aJunc); }
+    catch(e) { if (looping) stopLoop(); return; }
   }
-  playOnce();
+  if (!looping || !buf) return;
+
+  // ★ 再生と同時に「次のサイクル用バッファ」を先行レンダリング開始
+  //    再生が終わる頃にはレンダリングが完了しているため、ほぼ無音区間なしでループ
+  const nextBufPromise = renderJunctionPreview(aJunc);
+
+  loopSrc = actx.createBufferSource();
+  loopSrc.buffer = buf;
+  loopSrc.connect(actx.destination);
+  loopSrc.onended = async () => {
+    if (!looping) return;
+    // 先行レンダリングの完了を待つ（通常はすでに完了している）
+    let nextBuf = null;
+    try { nextBuf = await nextBufPromise; } catch(e) {}
+    doLoopCycle(nextBuf); // 次サイクルへ（最新状態のバッファで）
+  };
+  loopSrc.start();
 }
 
 function stopLoop() {
   looping = false;
-  if (loopSrc) { loopSrc.onended=null; try{loopSrc.stop();}catch(e){} loopSrc.disconnect(); loopSrc=null; }
+  if (loopSrc) {
+    loopSrc.onended = null;
+    try { loopSrc.stop(); } catch(e) {}
+    loopSrc.disconnect();
+    loopSrc = null;
+  }
+  updLoopBtn();
+}
+
+function updLoopBtn() {
   const btn = document.getElementById('btn-loop');
-  if (btn) btn.classList.remove('loop-on');
+  if (!btn) return;
+  if (looping) {
+    btn.classList.add('loop-on');
+    btn.innerHTML = '<span class="loop-dot"></span>ループ停止';
+  } else {
+    btn.classList.remove('loop-on');
+    btn.innerHTML = '🔁 継ぎ目ループ試聴';
+  }
 }
 
 // ════════════════════════════════════════════
