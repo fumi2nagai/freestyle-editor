@@ -334,6 +334,15 @@ select{cursor:pointer}
 }
 #lp-toast.show{opacity:1}
 
+/* ── SCROLL STRIP (ミニマップ) ── */
+#wf-strip-cv{
+  display:none;           /* zoom > 1× のみ表示 */
+  width:100%;height:32px;
+  cursor:pointer;
+  border-top:1px solid var(--border);
+}
+#wf-strip-cv.active{display:block}
+
 /* ════════════════════════════════════════
    MOBILE RESPONSIVE  (≤ 600px)
 ════════════════════════════════════════ */
@@ -364,6 +373,7 @@ select{cursor:pointer}
 
   /* Waveform canvas: taller for easier finger interaction */
   #wf-canvas{height:150px}
+  #wf-strip-cv{height:40px}   /* 指でつかみやすい高さ */
   #seg-bar{height:20px}
   #time-ruler{height:20px;font-size:10px}
 
@@ -483,6 +493,10 @@ select{cursor:pointer}
     </div>
     <div id="seg-bar"></div>
     <canvas id="wf-canvas"></canvas>
+    <!-- スクロールストリップ：ズーム時のみ表示するミニマップ -->
+    <canvas id="wf-strip-cv"
+            onmousedown="stripDown(event)"
+            ontouchstart="stripDown(event)"></canvas>
     <div id="time-ruler"></div>
   </div>
 
@@ -619,7 +633,9 @@ let skDragging = false;
 // Canvas refs
 let wfCv, wfCx;    // waveform canvas & context
 let jcCv, jcCx;    // junction canvas & context
+let stCv, stCx;    // scroll strip canvas & context
 let hover = -1;    // current hover time in seconds
+let stripDrag = {active:false, startX:0, startScroll:0};
 
 // ════════════════════════════════════════════
 //  INIT
@@ -627,8 +643,10 @@ let hover = -1;    // current hover time in seconds
 window.addEventListener('DOMContentLoaded', () => {
   wfCv = document.getElementById('wf-canvas');
   jcCv = document.getElementById('jc-canvas');
+  stCv = document.getElementById('wf-strip-cv');
   wfCx = wfCv.getContext('2d');
   jcCx = jcCv.getContext('2d');
+  stCx = stCv.getContext('2d');
 
   // Drop zone
   const dz = document.getElementById('drop-zone');
@@ -675,8 +693,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Resize
   window.addEventListener('resize', () => {
-    szCv(wfCv); szCv(jcCv);
-    if (abuf) { drawWF(); drawJC(); updateRuler(); }
+    szCv(wfCv); szCv(jcCv); szCv(stCv);
+    if (abuf) { drawWF(); drawJC(); updateRuler(); drawScrollStrip(); }
   });
 });
 
@@ -692,7 +710,7 @@ function szCv(cv) {
 }
 
 function initSz() {
-  szCv(wfCv); szCv(jcCv);
+  szCv(wfCv); szCv(jcCv); szCv(stCv);
 }
 
 // ════════════════════════════════════════════
@@ -742,7 +760,7 @@ async function loadFile(file) {
   hideOv();
   setTimeout(() => {
     initSz();
-    drawWF(); updateRuler(); updateSL(); updateTD(); updateJP();
+    drawWF(); updateRuler(); updateSL(); updateTD(); updateJP(); drawScrollStrip();
   }, 30);
 }
 
@@ -1171,7 +1189,7 @@ function wfWheel(e) {
     if (!abuf) return;
     const vd = abuf.duration / zoom;
     scroll = Math.max(0, Math.min(abuf.duration - vd, scroll + (e.deltaY/300)*vd));
-    drawWF(); updateRuler();
+    drawWF(); updateRuler(); drawScrollStrip();
   }
 }
 
@@ -1198,7 +1216,7 @@ let lpStartX = 0, lpStartY = 0;
 function clearLP() { if(lpTimer){clearTimeout(lpTimer);lpTimer=null;} }
 
 // ── Pinch state ──
-const pinch = {active:false, dist:0, zoomStart:1};
+const pinch = {active:false, dist:0, zoomStart:1, midSrcTime:0, midPx:0};
 
 function touchDist(e) {
   const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -1214,11 +1232,14 @@ function wfTouchStart(e) {
   clearLP();
 
   if (e.touches.length === 2) {
-    // Pinch-to-zoom
-    drag = null;
-    pinch.active = true;
-    pinch.dist = touchDist(e);
+    // ピンチ開始：距離・ズーム・中心点ソース時刻を記録
+    drag = null; clearLP();
+    pinch.active    = true;
+    pinch.dist      = touchDist(e);
     pinch.zoomStart = zoom;
+    const r = wfCv.getBoundingClientRect();
+    pinch.midPx = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - r.left;
+    pinch.midSrcTime = px2t(pinch.midPx); // ピンチ中心のソース時刻（ズーム後も固定）
     return;
   }
 
@@ -1267,14 +1288,25 @@ function wfTouchMove(e) {
   if (pinch.active && e.touches.length === 2) {
     const d = touchDist(e);
     const ratio = d / pinch.dist;
-    const newZ = Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length-1], pinch.zoomStart * ratio));
-    const best = ZOOMS.reduce((a,z,i) => Math.abs(z-newZ)<Math.abs(ZOOMS[a]-newZ)?i:a, 0);
+    const newZ  = Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length-1], pinch.zoomStart * ratio));
+    const best  = ZOOMS.reduce((a,z,i) => Math.abs(z-newZ)<Math.abs(ZOOMS[a]-newZ)?i:a, 0);
+
     if (best !== zIdx) {
       zIdx = best; zoom = ZOOMS[zIdx];
-      document.getElementById('zoom-lbl').textContent = zoom+'×';
-      if(abuf){ const vd=abuf.duration/zoom; scroll=Math.max(0,Math.min(abuf.duration-vd,scroll)); }
-      drawWF(); updateRuler();
+      document.getElementById('zoom-lbl').textContent = zoom + '×';
     }
+
+    if (abuf) {
+      // ピンチ中心のソース時刻が画面上の同じX位置に来るようにscrollを調整
+      const vd = abuf.duration / zoom;
+      const r  = wfCv.getBoundingClientRect();
+      const curMidPx = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - r.left;
+      // midSrcTime が curMidPx に来るようにscrollを計算
+      scroll = pinch.midSrcTime - (curMidPx / cvW()) * vd;
+      scroll = Math.max(0, Math.min(abuf.duration - vd, scroll));
+    }
+
+    drawWF(); updateRuler(); drawScrollStrip();
     return;
   }
 
@@ -1289,7 +1321,7 @@ function wfTouchMove(e) {
     const vd = abuf.duration / zoom;
     const dt = (tx - ts.startX) / cvW() * vd;
     scroll = Math.max(0, Math.min(abuf.duration-vd, ts.startScroll - dt));
-    drawWF(); updateRuler(); return;
+    drawWF(); updateRuler(); drawScrollStrip(); return;
   }
 
   // Simulate mouse event for draw/resize
@@ -1328,13 +1360,13 @@ function chgZoom(dir) {
     const vd = abuf.duration / zoom;
     scroll = Math.max(0, Math.min(abuf.duration-vd, scroll));
   }
-  drawWF(); updateRuler();
+  drawWF(); updateRuler(); drawScrollStrip();
 }
 
 function resetView() {
   zoom = 1; zIdx = 2;
   document.getElementById('zoom-lbl').textContent = '1×';
-  scroll = 0; drawWF(); updateRuler();
+  scroll = 0; drawWF(); updateRuler(); drawScrollStrip();
 }
 
 // ════════════════════════════════════════════
@@ -1342,10 +1374,8 @@ function resetView() {
 // ════════════════════════════════════════════
 function addSeg(s, e) {
   segs.push({s, e});
-  sortMerge();
-  rebuildJuncs();
-  playBuf = null;
-  drawWF(); updateSL(); updateTD(); updateJP();
+  sortMerge(); rebuildJuncs(); playBuf = null;
+  drawWF(); drawScrollStrip(); updateSL(); updateTD(); updateJP();
 }
 
 function delSeg(i) {
@@ -1354,7 +1384,7 @@ function delSeg(i) {
   rebuildJuncs();
   aJunc = Math.min(aJunc, Math.max(0, segs.length-2));
   playBuf = null;
-  drawWF(); updateSL(); updateTD(); updateJP();
+  drawWF(); drawScrollStrip(); updateSL(); updateTD(); updateJP();
 }
 
 function clearAll() {
@@ -1387,6 +1417,116 @@ function outDur() {
   let t = totalRaw();
   juncs.forEach(j => { if(j.type!=='cut') t -= j.ms/1000; });
   return Math.max(0, t);
+}
+
+// ════════════════════════════════════════════
+//  SCROLL STRIP（ミニマップ）
+// ════════════════════════════════════════════
+
+function drawScrollStrip() {
+  if (!stCv || !abuf || !peaks) return;
+
+  if (zoom <= 1.0) {
+    stCv.classList.remove('active');
+    return;
+  }
+  stCv.classList.add('active');
+  szCv(stCv);
+
+  const r = stCv.getBoundingClientRect();
+  const W = r.width, H = r.height;
+  if (W < 1) return;
+  const cx = stCx;
+
+  // 背景
+  cx.fillStyle = '#060912';
+  cx.fillRect(0, 0, W, H);
+
+  // ミニ波形（全体を縮小表示）
+  const yC = H / 2;
+  for (let x = 0; x < W; x++) {
+    const t  = (x / W) * abuf.duration;
+    const pi = Math.min(PKRES - 1, Math.floor(x / W * PKRES));
+    const hi = peaks.mx[pi], lo = peaks.mn[pi];
+    const yT = yC - hi * yC * 0.8;
+    const yB = yC - lo * yC * 0.8;
+    const inS = segs.some(sg => t >= sg.s && t <= sg.e);
+    cx.fillStyle = inS ? '#1db87d' : '#1e2438';
+    cx.globalAlpha = inS ? 0.6 : 0.25;
+    cx.fillRect(x, yT, 1, Math.max(1, yB - yT));
+  }
+  cx.globalAlpha = 1;
+
+  // 可視範囲ウィンドウ
+  const visFrac  = 1 / zoom;
+  const scrollFrac = abuf.duration > 0 ? scroll / abuf.duration : 0;
+  const vpX = scrollFrac * W;
+  const vpW = Math.max(4, visFrac * W);
+
+  // 範囲外を暗くする
+  cx.fillStyle = 'rgba(0,0,0,0.50)';
+  cx.fillRect(0,    0, vpX,          H);
+  cx.fillRect(vpX + vpW, 0, W - vpX - vpW, H);
+
+  // ビューポート枠
+  cx.strokeStyle = 'rgba(255,255,255,0.75)';
+  cx.lineWidth = 1.5;
+  cx.strokeRect(vpX + 0.75, 0.75, Math.max(2, vpW - 1.5), H - 1.5);
+
+  // 中央グリップライン（ドラッグ可能を示す）
+  cx.fillStyle = 'rgba(255,255,255,0.4)';
+  const cx_ = vpX + vpW / 2;
+  for (let i = -2; i <= 2; i++) {
+    cx.fillRect(cx_ + i * 4 - 1, H/2 - 4, 2, 8);
+  }
+}
+
+// スクロールストリップのドラッグ操作
+function stripDown(e) {
+  e.preventDefault();
+  if (!abuf || zoom <= 1) return;
+
+  const r   = stCv.getBoundingClientRect();
+  const cx  = e.touches ? e.touches[0].clientX : e.clientX;
+
+  // ビューポート位置の計算
+  const visFrac   = 1 / zoom;
+  const scrollFrac = abuf.duration > 0 ? scroll / abuf.duration : 0;
+  const vpLeft    = scrollFrac * r.width;
+  const vpRight   = vpLeft + visFrac * r.width;
+
+  // ビューポート枠内 → ドラッグ、外 → ジャンプしてからドラッグ
+  const onVP = cx >= r.left + vpLeft - 12 && cx <= r.left + vpRight + 12;
+  if (!onVP) {
+    // タップ位置を中心にジャンプ
+    const frac = (cx - r.left) / r.width;
+    const vd   = abuf.duration / zoom;
+    scroll = Math.max(0, Math.min(abuf.duration - vd, frac * abuf.duration - vd / 2));
+    drawWF(); updateRuler(); drawScrollStrip();
+  }
+
+  stripDrag = {active: true, startX: cx, startScroll: scroll};
+
+  const onMove = ev => {
+    if (!stripDrag.active) return;
+    ev.preventDefault();
+    const cx2 = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    const dx   = (cx2 - stripDrag.startX) / r.width * abuf.duration;
+    const vd   = abuf.duration / zoom;
+    scroll = Math.max(0, Math.min(abuf.duration - vd, stripDrag.startScroll + dx));
+    drawWF(); updateRuler(); drawScrollStrip();
+  };
+  const onUp = () => {
+    stripDrag.active = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup',   onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend',  onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup',   onUp);
+  document.addEventListener('touchmove', onMove, {passive: false});
+  document.addEventListener('touchend',  onUp);
 }
 
 // ════════════════════════════════════════════
