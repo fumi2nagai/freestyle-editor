@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FreestyleEdit — 演技用MP3エディタ</title>
+<style>
+:root {
+  --bg:        #0c0f1a;
+  --bg2:       #131726;
+  --bg3:       #1a1f32;
+  --bg4:       #20253a;
+  --border:    #2a3050;
+  --border2:   #38405e;
+  --text:      #d8ddef;
+  --text2:     #7e8aaa;
+  --teal:      #1db87d;
+  --teal2:     #16945f;
+  --teal3:     #0c5c3c;
+  --teal-a15:  rgba(29,184,125,0.15);
+  --teal-a08:  rgba(29,184,125,0.08);
+  --amber:     #f5a623;
+  --amber2:    #c4841b;
+  --amber-a15: rgba(245,166,35,0.15);
+  --amber-a30: rgba(245,166,35,0.30);
+  --blue:      #5b8dee;
+  --red:       #e05252;
+  --red-a15:   rgba(224,82,82,0.15);
+  --green:     #3cb96a;
+  --wf-bg:     #0a0d18;
+  --wf-bar:    #1e2438;
+  --wf-sel:    #1db87d;
+  --wf-ph:     #f5a623;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;
+  font-size:13px;display:flex;flex-direction:column;
+}
+
+/* ── HEADER ── */
+#hdr{
+  display:flex;align-items:center;gap:10px;
+  padding:7px 14px;background:var(--bg2);
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+#hdr h1{font-size:15px;font-weight:700;color:var(--teal);letter-spacing:.5px}
+#file-info{font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:340px}
+#open-btn{
+  margin-left:auto;padding:4px 12px;border-radius:6px;
+  border:1px solid var(--border2);background:var(--bg3);
+  color:var(--text);cursor:pointer;font-size:12px;white-space:nowrap;
+}
+#open-btn:hover{background:var(--bg4)}
+
+/* ── DROP ZONE ── */
+#drop-zone{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;cursor:pointer;border:2px dashed var(--border2);
+  margin:20px;border-radius:14px;transition:border-color .2s,background .2s;
+}
+#drop-zone:hover,#drop-zone.over{border-color:var(--teal);background:var(--teal-a08)}
+#drop-zone .dz-icon{font-size:52px}
+#drop-zone .dz-label{font-size:18px;color:var(--text2)}
+#drop-zone .dz-sub{font-size:12px;color:var(--text2)}
+
+/* ── EDITOR ── */
+#editor{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#editor.hidden{display:none}
+
+/* ── TRANSPORT ── */
+#transport{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:6px 12px;background:var(--bg2);
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.tbtn{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 11px;border-radius:6px;border:1px solid var(--border2);
+  background:var(--bg3);color:var(--text);cursor:pointer;font-size:12px;
+  transition:background .15s;white-space:nowrap;
+}
+.tbtn:hover{background:var(--bg4)}
+.tbtn:disabled{opacity:.4;cursor:default}
+.tbtn.play-active{background:var(--teal);border-color:var(--teal);color:#fff}
+
+#time-block{display:flex;align-items:baseline;gap:6px;margin:0 4px}
+#time-cur{
+  font-family:'Courier New',monospace;font-size:24px;font-weight:700;
+  color:var(--teal);letter-spacing:1px;
+}
+#time-tgt{font-size:12px;color:var(--text2)}
+#time-badge{
+  font-size:11px;font-weight:600;padding:2px 8px;
+  border-radius:10px;white-space:nowrap;
+}
+#time-badge.ok{background:rgba(60,185,106,.18);color:var(--green)}
+#time-badge.over{background:var(--amber-a15);color:var(--amber)}
+#time-badge.under{background:var(--amber-a15);color:var(--amber)}
+
+#prog-track{
+  flex:1;min-width:80px;height:5px;
+  background:var(--border);border-radius:3px;overflow:hidden;
+}
+#prog-fill{height:100%;background:var(--teal);border-radius:3px}
+#prog-fill.over{background:var(--red)}
+
+/* ── WAVEFORM PANEL ── */
+#wf-panel{background:var(--wf-bg);border-bottom:1px solid var(--border);flex-shrink:0}
+#wf-toolbar{
+  display:flex;align-items:center;gap:5px;
+  padding:4px 10px;background:var(--bg2);
+  border-bottom:1px solid var(--border);
+}
+.wfbtn{
+  padding:2px 7px;border-radius:4px;
+  border:1px solid var(--border2);background:var(--bg3);
+  color:var(--text);cursor:pointer;font-size:12px;
+}
+.wfbtn:hover{background:var(--bg4)}
+#zoom-lbl{font-size:11px;color:var(--text2);min-width:28px;text-align:center}
+#wf-hint{font-size:10px;color:var(--text2);margin-left:auto}
+
+#seg-bar{
+  height:18px;position:relative;overflow:hidden;
+  background:#0d1020;font-size:9px;
+}
+#wf-canvas{display:block;width:100%;height:130px;cursor:crosshair}
+#time-ruler{
+  height:18px;position:relative;overflow:hidden;
+  background:var(--bg2);border-top:1px solid var(--border);
+  font-size:9px;color:var(--text2);
+}
+
+/* ── BOTTOM PANEL ── */
+#bottom{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+#tab-bar{
+  display:flex;background:var(--bg2);
+  border-bottom:1px solid var(--border);padding:0 12px;flex-shrink:0;
+}
+.tab{
+  padding:7px 13px;border:none;background:transparent;
+  color:var(--text2);cursor:pointer;font-size:12px;
+  border-bottom:2px solid transparent;white-space:nowrap;
+  transition:color .15s;
+}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+
+.panel{display:none;flex:1;overflow-y:auto;padding:10px 12px}
+.panel.active{display:block}
+
+/* ── SEGMENT LIST ── */
+#seg-empty{color:var(--text2);text-align:center;padding:24px 0;font-size:13px}
+#seg-list{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
+.si{
+  display:flex;align-items:center;gap:7px;
+  padding:6px 9px;background:var(--bg2);
+  border:1px solid var(--border);border-radius:8px;
+}
+.si:hover{border-color:var(--border2)}
+.si-n{
+  width:22px;height:22px;border-radius:50%;
+  background:var(--teal-a15);color:var(--teal);
+  font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+.si-range{font-family:'Courier New',monospace;font-size:11px;color:var(--text2);flex-shrink:0}
+.si-dur{font-weight:600;font-size:12px;min-width:40px;flex-shrink:0}
+.si-acts{display:flex;gap:3px;margin-left:auto;flex-shrink:0}
+.sib{
+  padding:2px 7px;border-radius:4px;border:1px solid var(--border2);
+  background:var(--bg3);color:var(--text);cursor:pointer;font-size:11px;
+}
+.sib:hover{background:var(--bg4)}
+.sib.jb{border-color:rgba(245,166,35,.3);color:var(--amber)}
+.sib.jb:hover{background:var(--amber-a15)}
+.sib.db{border-color:rgba(224,82,82,.3);color:var(--red)}
+.sib.db:hover{background:var(--red-a15)}
+
+#seg-sum{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:7px 10px;background:var(--teal-a08);
+  border:1px solid rgba(29,184,125,.2);border-radius:8px;font-size:12px;
+}
+
+/* ── JUNCTION EDITOR ── */
+#jsel{display:flex;align-items:center;gap:5px;margin-bottom:10px;flex-wrap:wrap}
+.jsel-lbl{font-size:11px;color:var(--text2)}
+.jsbtn{
+  padding:3px 9px;border-radius:5px;border:1px solid var(--border2);
+  background:var(--bg3);color:var(--text);cursor:pointer;font-size:11px;
+}
+.jsbtn.active{border-color:var(--amber);background:var(--amber-a15);color:var(--amber)}
+
+#jzoom{border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px}
+#jhead{display:flex;height:20px;font-size:9px}
+.jhl,.jhr{flex:1;display:flex;align-items:center;padding:0 7px;overflow:hidden;white-space:nowrap}
+.jhl{background:rgba(29,184,125,.1);color:var(--teal)}
+.jhr{background:rgba(8,80,65,.2);color:#3fb389;justify-content:flex-end}
+#jxflbl{
+  display:flex;align-items:center;justify-content:center;
+  background:var(--amber-a30);color:var(--amber);
+  font-size:9px;min-width:30px;overflow:hidden;white-space:nowrap;
+  transition:width .2s;
+}
+#jc-canvas{display:block;width:100%;height:80px}
+#jruler{
+  display:flex;justify-content:space-between;
+  padding:2px 7px;font-size:9px;color:var(--text2);
+  background:var(--bg2);border-top:1px solid var(--border);
+}
+
+#jcontrols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px}
+.ctrl-hd{
+  font-size:10px;font-weight:700;color:var(--text2);
+  margin-bottom:7px;text-transform:uppercase;letter-spacing:.5px;
+}
+.rgroup{display:flex;flex-direction:column;gap:5px}
+.rgroup label{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px}
+.slider-row{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+.slider-row input[type=range]{flex:1;accent-color:var(--amber)}
+.slval{
+  font-family:'Courier New',monospace;font-size:11px;font-weight:700;
+  min-width:44px;text-align:right;color:var(--amber);
+}
+.presets{display:flex;gap:3px;flex-wrap:wrap}
+.pre{
+  padding:2px 7px;border-radius:4px;
+  border:1px solid var(--border2);background:var(--bg3);
+  color:var(--text2);cursor:pointer;font-size:10px;
+}
+.pre:hover{background:var(--bg4);color:var(--text)}
+
+#jacts{
+  display:flex;gap:7px;flex-wrap:wrap;align-items:center;
+  padding-top:8px;border-top:1px solid var(--border);
+}
+.abtn{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 10px;border-radius:6px;border:1px solid var(--border2);
+  background:var(--bg3);color:var(--text);cursor:pointer;font-size:11px;
+}
+.abtn:hover{background:var(--bg4)}
+.abtn.loop-on{border-color:var(--teal);color:var(--teal)}
+#j-empty{text-align:center;color:var(--text2);padding:24px;font-size:13px}
+#j-main{display:none}
+
+/* ── EXPORT ── */
+.exp-card{
+  padding:12px 14px;border:1px solid var(--border);
+  border-radius:8px;background:var(--bg2);margin-bottom:8px;max-width:480px;
+}
+.exp-card h3{font-size:13px;margin-bottom:3px}
+.exp-card p{font-size:11px;color:var(--text2);margin-bottom:9px}
+.exp-btn{
+  padding:5px 14px;border-radius:6px;
+  border:1px solid var(--teal2);background:var(--teal-a15);
+  color:var(--teal);cursor:pointer;font-size:12px;font-weight:600;
+}
+.exp-btn:hover{background:rgba(29,184,125,.25)}
+.exp-btn:disabled{opacity:.4;cursor:default}
+.br-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.br-row span{font-size:11px;color:var(--text2);min-width:72px}
+#br-sel{
+  padding:3px 7px;border-radius:5px;
+  border:1px solid var(--border2);background:var(--bg3);
+  color:var(--text);font-size:11px;
+}
+
+/* ── STATUS OVERLAY ── */
+#overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.75);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;z-index:99;
+}
+#overlay.hidden{display:none}
+#spin{
+  width:30px;height:30px;border:3px solid var(--border2);
+  border-top-color:var(--teal);border-radius:50%;
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#ov-msg{color:var(--text);font-size:15px}
+
+/* ── MISC ── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+input[type=radio]{accent-color:var(--teal)}
+select{cursor:pointer}
+</style>
+</head>
+<body>
+
+<!-- Status overlay -->
+<div id="overlay" class="hidden">
+  <div id="spin"></div>
+  <div id="ov-msg">処理中...</div>
+</div>
+
+<!-- Header -->
+<header id="hdr">
+  <h1>🎵 FreestyleEdit</h1>
+  <div id="file-info">ファイルを読み込んでください</div>
+  <button class="tbtn" id="open-btn" onclick="document.getElementById('fi').click()">📂 開く</button>
+  <input type="file" id="fi" accept="audio/*" style="display:none" onchange="handleFI(this)">
+</header>
+
+<!-- Drop zone -->
+<div id="drop-zone" onclick="document.getElementById('fi').click()">
+  <div class="dz-icon">🎵</div>
+  <div class="dz-label">MP3 / WAV をドラッグ＆ドロップ</div>
+  <div class="dz-sub">またはクリックしてファイルを選択</div>
+</div>
+
+<!-- Editor -->
+<div id="editor" class="hidden">
+
+  <!-- Transport -->
+  <div id="transport">
+    <button class="tbtn" id="btn-play" onclick="togglePlay()" disabled>▶ 再生</button>
+    <button class="tbtn" id="btn-stop" onclick="stopAll()" disabled>■ 停止</button>
+    <div id="time-block">
+      <span id="time-cur">0:00.0</span>
+      <span id="time-tgt">/ 1:15.0</span>
+      <span id="time-badge" class="under">-</span>
+    </div>
+    <div id="prog-track"><div id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <!-- Waveform -->
+  <div id="wf-panel">
+    <div id="wf-toolbar">
+      <button class="wfbtn" onclick="chgZoom(-1)">−</button>
+      <span id="zoom-lbl">1×</span>
+      <button class="wfbtn" onclick="chgZoom(1)">＋</button>
+      <button class="wfbtn" onclick="resetView()" style="margin-left:3px">全体表示</button>
+      <button class="wfbtn" onclick="clearAll()">全削除</button>
+      <span id="wf-hint">ドラッグ: 区間追加　端ドラッグ: 調整　右クリック: 削除</span>
+    </div>
+    <div id="seg-bar"></div>
+    <canvas id="wf-canvas"></canvas>
+    <div id="time-ruler"></div>
+  </div>
+
+  <!-- Bottom -->
+  <div id="bottom">
+    <div id="tab-bar">
+      <button class="tab active" data-p="segs"  onclick="showP('segs',this)">📋 区間一覧</button>
+      <button class="tab"        data-p="junc"  onclick="showP('junc',this)">✂️ 継ぎ目</button>
+      <button class="tab"        data-p="expo"  onclick="showP('expo',this)">💾 出力</button>
+    </div>
+
+    <!-- Segments panel -->
+    <div id="panel-segs" class="panel active">
+      <div id="seg-empty">波形をドラッグして演技に使う区間を選択してください</div>
+      <div id="seg-list"></div>
+      <div id="seg-sum" style="display:none"></div>
+    </div>
+
+    <!-- Junction panel -->
+    <div id="panel-junc" class="panel">
+      <div id="j-empty">区間が2つ以上あると継ぎ目を編集できます</div>
+      <div id="j-main">
+        <div id="jsel"><span class="jsel-lbl">継ぎ目を選択：</span></div>
+        <div id="jzoom">
+          <div id="jhead">
+            <div class="jhl" id="jhl">← 区間①末尾</div>
+            <div id="jxflbl">XF</div>
+            <div class="jhr" id="jhr">区間②先頭 →</div>
+          </div>
+          <canvas id="jc-canvas"></canvas>
+          <div id="jruler">
+            <span>-2.0秒</span><span>-1.0秒</span><span>◆継ぎ目</span><span>+1.0秒</span><span>+2.0秒</span>
+          </div>
+        </div>
+        <div id="jcontrols">
+          <div>
+            <div class="ctrl-hd">接続タイプ</div>
+            <div class="rgroup">
+              <label><input type="radio" name="jt" value="cut" onchange="setJType('cut')"> ハードカット</label>
+              <label><input type="radio" name="jt" value="xf"  onchange="setJType('xf')" checked> クロスフェード</label>
+            </div>
+          </div>
+          <div>
+            <div class="ctrl-hd">オーバーラップ長</div>
+            <div class="slider-row">
+              <input type="range" id="xf-sl" min="0" max="500" value="100" oninput="setXF(this.value)">
+              <span class="slval" id="xf-val">100ms</span>
+            </div>
+            <div class="presets">
+              <button class="pre" onclick="applyXF(0)">なし</button>
+              <button class="pre" onclick="applyXF(30)">30ms</button>
+              <button class="pre" onclick="applyXF(80)">80ms</button>
+              <button class="pre" onclick="applyXF(150)">150ms</button>
+              <button class="pre" onclick="applyXF(300)">300ms</button>
+            </div>
+          </div>
+        </div>
+        <div id="jacts">
+          <button class="abtn" id="btn-loop" onclick="toggleLoop()">🔁 継ぎ目ループ試聴</button>
+          <button class="abtn" onclick="snapZero()">⚡ ゼロクロッシングにスナップ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export panel -->
+    <div id="panel-expo" class="panel">
+      <div class="exp-card">
+        <h3>🎵 WAV形式で出力</h3>
+        <p>非圧縮・高音質。ファイルサイズ大。常に動作します。</p>
+        <button class="exp-btn" onclick="doExport('wav')">WAVで出力</button>
+      </div>
+      <div class="exp-card">
+        <h3>🎵 MP3形式で出力</h3>
+        <p>小容量。インターネット接続が必要です（lamejs読み込み時）。</p>
+        <div class="br-row">
+          <span>ビットレート</span>
+          <select id="br-sel">
+            <option value="128">128 kbps</option>
+            <option value="192" selected>192 kbps</option>
+            <option value="320">320 kbps</option>
+          </select>
+        </div>
+        <button class="exp-btn" onclick="doExport('mp3')">MP3で出力</button>
+      </div>
+    </div>
+  </div><!-- /bottom -->
+
+</div><!-- /editor -->
+
+<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+<script>
+// ════════════════════════════════════════════
+//  CONSTANTS & STATE
+// ════════════════════════════════════════════
+const TARGET = 75;          // 1:15.0
+const PKRES  = 8192;        // Peak array resolution
+const ZOOMS  = [0.25,0.5,1,2,4,8,16];
+let zIdx = 2;               // default 1×
+
+// Audio
+let actx  = null;   // AudioContext
+let abuf  = null;   // Master AudioBuffer (decoded source)
+let peaks = null;   // { mn: Float32Array, mx: Float32Array }
+let fName = '';
+
+// Edit state
+let segs  = [];     // [{s, e}] seconds — sorted, non-overlapping
+let juncs = [];     // [{type:'xf'|'cut', ms:number}]  length = segs.length-1
+let aJunc = 0;      // active junction index
+
+// View state
+let zoom = 1.0;
+let scroll = 0.0;   // seconds from left edge
+
+// Playback
+let playSrc   = null;
+let playBuf   = null;   // Rendered mix (cache)
+let playAt    = 0;      // audioCtx.currentTime when started
+let playOff   = 0;      // seconds into playBuf
+let playing   = false;
+let playAnimId= null;
+
+// Loop (junction preview)
+let loopSrc = null;
+let looping = false;
+
+// Drag
+let drag = null;
+// drag = {mode:'new', t0, t1}
+// drag = {mode:'rs'|'re', si, startX}  (resize start|end of segment si)
+
+// Canvas refs
+let wfCv, wfCx;    // waveform canvas & context
+let jcCv, jcCx;    // junction canvas & context
+let hover = -1;    // current hover time in seconds
+
+// ════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  wfCv = document.getElementById('wf-canvas');
+  jcCv = document.getElementById('jc-canvas');
+  wfCx = wfCv.getContext('2d');
+  jcCx = jcCv.getContext('2d');
+
+  // Drop zone
+  const dz = document.getElementById('drop-zone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(f); else alert('音声ファイルをドロップしてください');
+  });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (f && abuf) loadFile(f); // only if editor already open
+  });
+
+  // Waveform events
+  wfCv.addEventListener('mousedown', wfDown);
+  wfCv.addEventListener('mousemove', wfMove);
+  wfCv.addEventListener('mouseup',   wfUp);
+  wfCv.addEventListener('mouseleave',wfLeave);
+  wfCv.addEventListener('contextmenu', wfRClick);
+  wfCv.addEventListener('wheel', wfWheel, {passive:false});
+
+  // Touch events for waveform
+  wfCv.addEventListener('touchstart',  wfTouchStart, {passive:false});
+  wfCv.addEventListener('touchmove',   wfTouchMove,  {passive:false});
+  wfCv.addEventListener('touchend',    wfTouchEnd,   {passive:false});
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+    if (e.key === ' ')      { e.preventDefault(); togglePlay(); }
+    if (e.key === 'Escape') { stopAll(); }
+  });
+
+  // Resize
+  window.addEventListener('resize', () => {
+    szCv(wfCv); szCv(jcCv);
+    if (abuf) { drawWF(); drawJC(); updateRuler(); }
+  });
+});
+
+function szCv(cv) {
+  if (!cv) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const r = cv.getBoundingClientRect();
+  if (r.width < 1) return;
+  cv.width  = Math.round(r.width  * dpr);
+  cv.height = Math.round(r.height * dpr);
+  const cx = cv.getContext('2d');
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function initSz() {
+  szCv(wfCv); szCv(jcCv);
+}
+
+// ════════════════════════════════════════════
+//  FILE LOADING
+// ════════════════════════════════════════════
+function handleFI(inp) { if (inp.files[0]) loadFile(inp.files[0]); inp.value=''; }
+
+async function loadFile(file) {
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    alert('Web Audio APIに対応したブラウザが必要です（Chrome / Edge / Firefox）'); return;
+  }
+  if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+  fName = file.name.replace(/\.[^.]+$/, '');
+
+  showOv('ファイルを読み込み中...');
+  try {
+    const ab = await file.arrayBuffer();
+    showOv('デコード中...');
+    abuf = await actx.decodeAudioData(ab);
+    showOv('波形データを生成中...');
+    peaks = await mkPeaks(abuf);
+  } catch(err) {
+    hideOv(); alert('読み込みエラー: ' + err.message); return;
+  }
+
+  // Reset state
+  segs = []; juncs = []; aJunc = 0;
+  zoom = 1; zIdx = 2; scroll = 0;
+  stopAll(); playBuf = null;
+
+  // Show editor
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('editor').classList.remove('hidden');
+  document.getElementById('file-info').textContent =
+    `${file.name}  (${fmtD(abuf.duration)} / ${abuf.sampleRate}Hz / ${abuf.numberOfChannels}ch)`;
+  document.getElementById('btn-play').disabled = false;
+  document.getElementById('btn-stop').disabled = false;
+
+  hideOv();
+  setTimeout(() => {
+    initSz();
+    drawWF(); updateRuler(); updateSL(); updateTD(); updateJP();
+  }, 30);
+}
+
+async function mkPeaks(buf) {
+  return new Promise(res => {
+    requestAnimationFrame(() => {
+      const len = buf.length, nch = buf.numberOfChannels;
+      const chs = Array.from({length:nch}, (_,i) => buf.getChannelData(i));
+      const mn = new Float32Array(PKRES);
+      const mx = new Float32Array(PKRES);
+      for (let i = 0; i < PKRES; i++) {
+        const s = Math.floor(i / PKRES * len);
+        const e = Math.min(Math.floor((i+1)/PKRES * len), len);
+        let lo = 0, hi = 0;
+        for (let j = s; j < e; j++) {
+          let v = 0; for (let c=0;c<nch;c++) v += chs[c][j]; v /= nch;
+          if (v < lo) lo = v; if (v > hi) hi = v;
+        }
+        mn[i] = lo; mx[i] = hi;
+      }
+      res({mn, mx});
+    });
+  });
+}
+
+// ════════════════════════════════════════════
+//  COORDINATE CONVERSION
+// ════════════════════════════════════════════
+function cvW() { return wfCv.getBoundingClientRect().width; }
+
+function px2t(x) {
+  const vd = abuf.duration / zoom;
+  return scroll + (x / cvW()) * vd;
+}
+function t2px(t) {
+  const vd = abuf.duration / zoom;
+  return ((t - scroll) / vd) * cvW();
+}
+function clampT(t) { return Math.max(0, Math.min(abuf ? abuf.duration : 0, t)); }
+
+// Hit test: returns {mode, si} or {mode:'new'}
+function hitTest(x) {
+  const TOL = 9;
+  for (let i = 0; i < segs.length; i++) {
+    if (Math.abs(x - t2px(segs[i].s)) <= TOL) return {mode:'rs', si:i};
+    if (Math.abs(x - t2px(segs[i].e)) <= TOL) return {mode:'re', si:i};
+  }
+  return {mode:'new'};
+}
+
+// ════════════════════════════════════════════
+//  WAVEFORM DRAWING
+// ════════════════════════════════════════════
+function drawWF() {
+  if (!abuf || !peaks) return;
+  const r = wfCv.getBoundingClientRect();
+  const W = r.width, H = r.height;
+  if (W < 1) return;
+  const cx = wfCx;
+
+  // Background
+  cx.fillStyle = '#0a0d18';
+  cx.fillRect(0, 0, W, H);
+
+  const vd  = abuf.duration / zoom;
+  const yC  = H / 2;
+
+  // Draw bars
+  for (let x = 0; x < W; x++) {
+    const t  = scroll + (x / W) * vd;
+    if (t < 0 || t > abuf.duration) continue;
+    const pi = Math.min(PKRES-1, Math.floor(t / abuf.duration * PKRES));
+    const hi = peaks.mx[pi];
+    const lo = peaks.mn[pi];
+    const yT = yC - hi * yC * 0.92;
+    const yB = yC - lo * yC * 0.92;
+    const inS = segs.some(sg => t >= sg.s && t <= sg.e);
+    cx.fillStyle = inS ? '#1db87d' : '#1e2438';
+    cx.globalAlpha = inS ? 0.75 : 0.4;
+    cx.fillRect(x, yT, 1, Math.max(1, yB - yT));
+  }
+  cx.globalAlpha = 1;
+
+  // Segment overlays
+  segs.forEach((sg, i) => {
+    const x1 = t2px(sg.s), x2 = t2px(sg.e);
+    if (x2 < 0 || x1 > W) return;
+    const cx1 = Math.max(0, x1), cx2 = Math.min(W, x2);
+
+    // Faint fill
+    cx.fillStyle = 'rgba(29,184,125,.06)';
+    cx.fillRect(cx1, 0, cx2-cx1, H);
+
+    // Handles
+    if (x1 >= -2 && x1 <= W+2) {
+      cx.fillStyle = '#1db87d';
+      cx.fillRect(x1-1, 0, 3, H);
+      // Triangle grip
+      cx.fillStyle = '#3fd89a';
+      cx.beginPath();
+      cx.moveTo(x1+2, 4); cx.lineTo(x1+8, 10); cx.lineTo(x1+2, 16);
+      cx.fill();
+    }
+    if (x2 >= -2 && x2 <= W+2) {
+      cx.fillStyle = '#1db87d';
+      cx.fillRect(x2-1, 0, 3, H);
+      cx.fillStyle = '#3fd89a';
+      cx.beginPath();
+      cx.moveTo(x2-2, 4); cx.lineTo(x2-8, 10); cx.lineTo(x2-2, 16);
+      cx.fill();
+    }
+
+    // Segment number
+    cx.fillStyle = '#1db87d';
+    cx.font = 'bold 10px monospace';
+    cx.fillText(i+1, Math.max(cx1+5, 3), 13);
+
+    // Junction marker
+    if (i < segs.length-1) {
+      const jx = t2px(sg.e);
+      if (jx >= 0 && jx <= W) {
+        cx.fillStyle = '#f5a623';
+        cx.globalAlpha = 0.65;
+        cx.fillRect(jx, 0, 2, H);
+        cx.globalAlpha = 1;
+      }
+    }
+  });
+
+  // Drag preview
+  if (drag && drag.mode === 'new') {
+    const s = Math.min(drag.t0, drag.t1), e = Math.max(drag.t0, drag.t1);
+    const px1 = t2px(s), px2 = t2px(e);
+    cx.fillStyle = 'rgba(29,184,125,.25)';
+    cx.fillRect(px1, 0, px2-px1, H);
+    cx.fillStyle = '#3fd89a';
+    cx.fillRect(px1, 0, 2, H);
+    cx.fillRect(px2, 0, 2, H);
+  }
+
+  // Hover time line
+  if (hover >= 0) {
+    const hx = t2px(hover);
+    cx.fillStyle = 'rgba(200,210,255,0.18)';
+    cx.fillRect(hx, 0, 1, H);
+  }
+
+  // Playhead
+  if (playing) {
+    const ph = getPlaySrcTime();
+    if (ph >= 0) {
+      const px = t2px(ph);
+      if (px >= 0 && px <= W) {
+        cx.fillStyle = '#f5a623';
+        cx.fillRect(px-1, 0, 2, H);
+        // Arrow cap
+        cx.beginPath();
+        cx.moveTo(px-5, 0); cx.lineTo(px+5, 0); cx.lineTo(px, 7);
+        cx.fill();
+      }
+    }
+  }
+
+  // Target-time zone guide (faint red after 1:15 mark)
+  if (abuf) {
+    const tx = t2px(TARGET);
+    if (tx >= 0 && tx <= W) {
+      cx.fillStyle = 'rgba(224,82,82,0.08)';
+      cx.fillRect(tx, 0, W-tx, H);
+      cx.fillStyle = 'rgba(224,82,82,0.4)';
+      cx.fillRect(tx, 0, 1, H);
+    }
+  }
+
+  // Seg-bar update
+  updateSegBar();
+}
+
+function updateSegBar() {
+  const bar = document.getElementById('seg-bar');
+  if (!abuf) return;
+  bar.innerHTML = '';
+  bar.style.position = 'relative';
+  const W = cvW();
+  segs.forEach((sg, i) => {
+    const x1 = t2px(sg.s), x2 = t2px(sg.e);
+    if (x2 < 0 || x1 > W) return;
+    const div = document.createElement('div');
+    div.style.cssText = `position:absolute;left:${Math.max(0,x1)}px;` +
+      `width:${Math.min(W,x2)-Math.max(0,x1)}px;height:100%;` +
+      `display:flex;align-items:center;padding:0 4px;` +
+      `font-size:9px;color:#3fd89a;overflow:hidden;white-space:nowrap;`;
+    const dur = (sg.e-sg.s).toFixed(1);
+    div.textContent = `${i+1}: ${fmtT(sg.s)}→${fmtT(sg.e)} (${dur}s)`;
+    bar.appendChild(div);
+  });
+}
+
+// ════════════════════════════════════════════
+//  JUNCTION CANVAS
+// ════════════════════════════════════════════
+function drawJC() {
+  if (!abuf || !peaks || segs.length < 2) return;
+  const r = jcCv.getBoundingClientRect();
+  const W = r.width, H = r.height;
+  if (W < 1) return;
+  szCv(jcCv);
+  const cx = jcCx;
+
+  const ji = Math.min(aJunc, segs.length-2);
+  const lSeg = segs[ji], rSeg = segs[ji+1];
+  const junc = juncs[ji] || {type:'xf', ms:100};
+
+  const PRE = 2, POST = 2;
+  const lEnd = lSeg.e;
+  const rSt  = rSeg.s;
+  const gap   = rSt - lEnd;       // gap between adjacent segments in source (should be 0 for contiguous)
+  const viewDur = PRE + gap + POST;
+
+  cx.fillStyle = '#0a0d18';
+  cx.fillRect(0, 0, W, H);
+
+  const xfD = junc.type !== 'cut' ? junc.ms/1000 : 0;
+  // Visual center of junction is between lEnd and rSt
+  const lEndX = (PRE / viewDur) * W;
+  const rStX  = ((PRE + gap) / viewDur) * W;
+  const xfPx  = (xfD / viewDur) * W;
+  const xfCX  = (lEndX + rStX) / 2;
+
+  // Crossfade highlight
+  if (xfPx > 1) {
+    const gr = cx.createLinearGradient(xfCX-xfPx/2, 0, xfCX+xfPx/2, 0);
+    gr.addColorStop(0,   'rgba(29,184,125,.15)');
+    gr.addColorStop(0.5, 'rgba(245,166,35,.45)');
+    gr.addColorStop(1,   'rgba(8,80,65,.15)');
+    cx.fillStyle = gr;
+    cx.fillRect(xfCX-xfPx/2, 0, xfPx, H);
+  }
+
+  const yC = H/2;
+  function drawRange(srcS, srcE, dstX, dstW, color, alpha) {
+    if (srcS < 0) srcS = 0;
+    if (srcE > abuf.duration) srcE = abuf.duration;
+    if (srcE <= srcS || dstW < 1) return;
+    cx.fillStyle = color; cx.globalAlpha = alpha;
+    for (let i = 0; i < dstW; i++) {
+      const t  = srcS + (i/dstW)*(srcE-srcS);
+      const pi = Math.min(PKRES-1, Math.floor(t/abuf.duration*PKRES));
+      const hi = peaks.mx[pi], lo = peaks.mn[pi];
+      const yT = yC - hi*yC*0.85, yB = yC - lo*yC*0.85;
+      cx.fillRect(dstX+i, yT, 1, Math.max(1, yB-yT));
+    }
+    cx.globalAlpha = 1;
+  }
+
+  drawRange(lEnd-PRE, lEnd, 0,     lEndX,    '#1db87d', 0.8);
+  if (gap > 0.01) {
+    // Gap zone
+    cx.fillStyle = '#15192a'; cx.fillRect(lEndX, 0, rStX-lEndX, H);
+    cx.fillStyle = '#404870'; cx.font = '9px sans-serif'; cx.textAlign = 'center';
+    cx.fillText('(カット区間)', (lEndX+rStX)/2, H/2+4); cx.textAlign='left';
+  }
+  drawRange(rSt, rSt+POST, rStX, W-rStX, '#0c8a5a', 0.8);
+
+  // Junction line(s)
+  cx.strokeStyle = '#f5a623'; cx.lineWidth = 2;
+  [lEndX, rStX].forEach(x => {
+    cx.beginPath(); cx.moveTo(x,0); cx.lineTo(x,H); cx.stroke();
+  });
+
+  // Update XF label
+  const lbl = document.getElementById('jxflbl');
+  if (lbl) { lbl.style.width = Math.max(28, xfPx)+'px'; lbl.textContent = xfD>0 ? `${junc.ms}ms` : '|'; }
+  // Update header
+  document.getElementById('jhl').textContent = `← 区間${ji+1}末尾 (${fmtT(lEnd)})`;
+  document.getElementById('jhr').textContent = `区間${ji+2}先頭 (${fmtT(rSt)}) →`;
+}
+
+// ════════════════════════════════════════════
+//  TIME RULER
+// ════════════════════════════════════════════
+function updateRuler() {
+  if (!abuf) return;
+  const ruler = document.getElementById('time-ruler');
+  const W = cvW();
+  const vd = abuf.duration / zoom;
+  const ticks = [0.5,1,2,5,10,15,30,60,120];
+  const ideal = vd / 8;
+  const tick = ticks.find(t => t >= ideal) || 120;
+
+  ruler.innerHTML = '';
+  ruler.style.position = 'relative';
+  const start = Math.ceil(scroll / tick) * tick;
+  for (let t = start; t <= scroll+vd+0.01; t += tick) {
+    const x = ((t-scroll)/vd)*W;
+    if (x < 0 || x > W+1) continue;
+    const sp = document.createElement('span');
+    sp.style.cssText = `position:absolute;left:${x}px;transform:translateX(-50%);white-space:nowrap;font-size:9px;`;
+    sp.textContent = fmtT(t);
+    ruler.appendChild(sp);
+    // Tick mark via border
+    sp.style.borderLeft = '1px solid rgba(100,120,160,.3)';
+    sp.style.paddingLeft = '3px';
+  }
+}
+
+// ════════════════════════════════════════════
+//  WAVEFORM MOUSE EVENTS
+// ════════════════════════════════════════════
+function getX(e) {
+  const r = wfCv.getBoundingClientRect();
+  return (e.clientX ?? e.touches[0].clientX) - r.left;
+}
+
+function wfDown(e) {
+  if (!abuf) return; e.preventDefault();
+  const x = getX(e);
+  const t = clampT(px2t(x));
+  const ht = hitTest(x);
+  drag = ht.mode === 'new' ? {mode:'new', t0:t, t1:t}
+                            : {mode:ht.mode, si:ht.si, startX:x};
+}
+
+function wfMove(e) {
+  if (!abuf) return;
+  const x = getX(e);
+  const t = clampT(px2t(x));
+  hover = t;
+
+  if (!drag) {
+    const ht = hitTest(x);
+    wfCv.style.cursor = ht.mode!=='new' ? 'ew-resize' : 'crosshair';
+    drawWF(); return;
+  }
+
+  if (drag.mode === 'new') {
+    drag.t1 = t;
+  } else {
+    // Resize
+    const sg = segs[drag.si];
+    if (drag.mode === 'rs') {
+      segs[drag.si].s = Math.min(t, sg.e - 0.05);
+    } else {
+      segs[drag.si].e = Math.max(t, sg.s + 0.05);
+    }
+    sortMerge(); playBuf = null;
+    updateSL(); updateTD();
+  }
+  drawWF();
+}
+
+function wfUp(e) {
+  if (!drag) return;
+  if (drag.mode === 'new') {
+    const s = Math.min(drag.t0, drag.t1);
+    const en = Math.max(drag.t0, drag.t1);
+    if (en - s > 0.08) addSeg(s, en);
+  }
+  drag = null; drawWF();
+}
+
+function wfLeave() {
+  hover = -1;
+  if (!drag) { drawWF(); return; }
+  // Keep drag alive (user may re-enter)
+}
+
+function wfRClick(e) {
+  e.preventDefault();
+  if (!abuf) return;
+  const x = getX(e);
+  const t = px2t(x);
+  const i = segs.findIndex(sg => t >= sg.s && t <= sg.e);
+  if (i >= 0 && confirm(`区間 ${i+1} を削除しますか？`)) delSeg(i);
+}
+
+function wfWheel(e) {
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) {
+    chgZoom(e.deltaY > 0 ? -1 : 1);
+  } else {
+    if (!abuf) return;
+    const vd = abuf.duration / zoom;
+    scroll = Math.max(0, Math.min(abuf.duration - vd, scroll + (e.deltaY/300)*vd));
+    drawWF(); updateRuler();
+  }
+}
+
+// Touch support (single-touch drag)
+let touchDrag = false;
+function wfTouchStart(e) { e.preventDefault(); touchDrag=true; wfDown(e); }
+function wfTouchMove(e)  { e.preventDefault(); if(touchDrag) wfMove(e); }
+function wfTouchEnd(e)   { e.preventDefault(); touchDrag=false; wfUp(e); }
+
+// ════════════════════════════════════════════
+//  ZOOM & SCROLL
+// ════════════════════════════════════════════
+function chgZoom(dir) {
+  const old = zIdx;
+  zIdx = Math.max(0, Math.min(ZOOMS.length-1, zIdx+dir));
+  if (zIdx === old) return;
+  zoom = ZOOMS[zIdx];
+  document.getElementById('zoom-lbl').textContent = zoom + '×';
+  if (abuf) {
+    const vd = abuf.duration / zoom;
+    scroll = Math.max(0, Math.min(abuf.duration-vd, scroll));
+  }
+  drawWF(); updateRuler();
+}
+
+function resetView() {
+  zoom = 1; zIdx = 2;
+  document.getElementById('zoom-lbl').textContent = '1×';
+  scroll = 0; drawWF(); updateRuler();
+}
+
+// ════════════════════════════════════════════
+//  SEGMENT OPERATIONS
+// ════════════════════════════════════════════
+function addSeg(s, e) {
+  segs.push({s, e});
+  sortMerge();
+  rebuildJuncs();
+  playBuf = null;
+  drawWF(); updateSL(); updateTD(); updateJP();
+}
+
+function delSeg(i) {
+  segs.splice(i, 1);
+  juncs = juncs.slice(0, Math.max(0, segs.length-1));
+  rebuildJuncs();
+  aJunc = Math.min(aJunc, Math.max(0, segs.length-2));
+  playBuf = null;
+  drawWF(); updateSL(); updateTD(); updateJP();
+}
+
+function clearAll() {
+  if (!abuf) return;
+  if (segs.length > 0 && !confirm('すべての区間を削除しますか？')) return;
+  segs = []; juncs = []; aJunc = 0; playBuf = null;
+  stopAll(); drawWF(); updateSL(); updateTD(); updateJP();
+}
+
+function sortMerge() {
+  segs.sort((a,b) => a.s - b.s);
+  const merged = [];
+  segs.forEach(sg => {
+    const last = merged[merged.length-1];
+    if (last && sg.s <= last.e) { last.e = Math.max(last.e, sg.e); }
+    else merged.push({...sg});
+  });
+  segs = merged;
+  rebuildJuncs();
+}
+
+function rebuildJuncs() {
+  const need = Math.max(0, segs.length-1);
+  while (juncs.length < need) juncs.push({type:'xf', ms:100});
+  juncs = juncs.slice(0, need);
+}
+
+function totalRaw() { return segs.reduce((a,sg)=>a+(sg.e-sg.s),0); }
+function outDur() {
+  let t = totalRaw();
+  juncs.forEach(j => { if(j.type!=='cut') t -= j.ms/1000; });
+  return Math.max(0, t);
+}
+
+// ════════════════════════════════════════════
+//  AUDIO RENDERING
+// ════════════════════════════════════════════
+async function renderMix() {
+  if (!abuf || !segs.length) return null;
+
+  let total = 0;
+  segs.forEach((sg,i) => {
+    total += sg.e - sg.s;
+    if (i < juncs.length && juncs[i].type!=='cut') total -= juncs[i].ms/1000;
+  });
+  total = Math.max(0.05, total);
+
+  const sr  = abuf.sampleRate;
+  const nch = abuf.numberOfChannels;
+  const oc  = new OfflineAudioContext(nch, Math.ceil(total*sr), sr);
+  let outT  = 0;
+
+  segs.forEach((sg, i) => {
+    const segD    = sg.e - sg.s;
+    const xfD     = (i < juncs.length && juncs[i].type!=='cut') ? juncs[i].ms/1000 : 0;
+    const prevXfD = (i > 0 && juncs[i-1] && juncs[i-1].type!=='cut') ? juncs[i-1].ms/1000 : 0;
+
+    const src  = oc.createBufferSource(); src.buffer = abuf;
+    const gain = oc.createGain();
+    src.connect(gain); gain.connect(oc.destination);
+
+    // Fade in (from previous XF)
+    if (prevXfD > 0 && i > 0) {
+      gain.gain.setValueAtTime(0, outT);
+      gain.gain.linearRampToValueAtTime(1, outT + prevXfD);
+    } else {
+      gain.gain.setValueAtTime(1, outT);
+    }
+
+    // Fade out (for next XF)
+    if (xfD > 0) {
+      const fs = outT + segD - xfD;
+      if (fs > outT) gain.gain.setValueAtTime(1, fs);
+      gain.gain.linearRampToValueAtTime(0, outT + segD);
+    }
+
+    src.start(outT, sg.s, segD);
+    outT += segD - xfD;
+  });
+
+  return oc.startRendering();
+}
+
+async function renderJunctionPreview(ji) {
+  if (!abuf || segs.length < 2) return null;
+  const lSeg = segs[ji], rSeg = segs[ji+1];
+  const junc = juncs[ji] || {type:'xf', ms:100};
+  const PRE  = Math.min(2.0, lSeg.e - lSeg.s);
+  const POST = Math.min(2.0, rSeg.e - rSeg.s);
+  const xfD  = junc.type !== 'cut' ? junc.ms/1000 : 0;
+  const total = Math.max(0.05, PRE + POST - xfD);
+
+  const sr = abuf.sampleRate, nch = abuf.numberOfChannels;
+  const oc = new OfflineAudioContext(nch, Math.ceil(total*sr), sr);
+
+  // Left tail
+  const srcL = oc.createBufferSource(); srcL.buffer = abuf;
+  const gL   = oc.createGain();
+  srcL.connect(gL); gL.connect(oc.destination);
+  gL.gain.setValueAtTime(1, 0);
+  if (xfD > 0) {
+    gL.gain.setValueAtTime(1, PRE-xfD);
+    gL.gain.linearRampToValueAtTime(0, PRE);
+  }
+  srcL.start(0, lSeg.e - PRE, PRE);
+
+  // Right head
+  const srcR = oc.createBufferSource(); srcR.buffer = abuf;
+  const gR   = oc.createGain();
+  srcR.connect(gR); gR.connect(oc.destination);
+  const rAt = PRE - xfD;
+  if (xfD > 0) {
+    gR.gain.setValueAtTime(0, rAt);
+    gR.gain.linearRampToValueAtTime(1, rAt + xfD);
+  } else {
+    gR.gain.setValueAtTime(1, rAt);
+  }
+  srcR.start(Math.max(0, rAt), rSeg.s, POST);
+
+  return oc.startRendering();
+}
+
+// ════════════════════════════════════════════
+//  PLAYBACK
+// ════════════════════════════════════════════
+async function ensureCtx() {
+  if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+  if (actx.state === 'suspended') await actx.resume();
+}
+
+async function togglePlay() {
+  if (playing) { pausePB(); return; }
+  if (!segs.length) { alert('区間が選択されていません'); return; }
+  await ensureCtx();
+  stopLoop();
+
+  if (!playBuf) {
+    showOv('ミックスをレンダリング中...');
+    try { playBuf = await renderMix(); } catch(e) { hideOv(); alert('エラー: '+e.message); return; }
+    hideOv();
+  }
+
+  if (playSrc) { try { playSrc.stop(); } catch(e){} playSrc.disconnect(); }
+  playSrc = actx.createBufferSource();
+  playSrc.buffer = playBuf;
+  playSrc.connect(actx.destination);
+  playSrc.onended = () => { if(playing){ playing=false; playOff=0; updPlayUI(); } };
+
+  playOff = Math.min(playOff, playBuf.duration);
+  playAt  = actx.currentTime;
+  playSrc.start(0, playOff);
+  playing = true;
+  updPlayUI();
+
+  // Animate playhead
+  cancelAnimationFrame(playAnimId);
+  (function loop() {
+    if (!playing) return;
+    drawWF(); updPlayUI();
+    playAnimId = requestAnimationFrame(loop);
+  })();
+}
+
+function pausePB() {
+  if (!playing) return;
+  playOff = Math.min(playBuf ? playBuf.duration : 0, (actx.currentTime - playAt) + playOff);
+  if (playSrc) { playSrc.onended=null; try{playSrc.stop();}catch(e){} }
+  playing = false; cancelAnimationFrame(playAnimId); updPlayUI();
+}
+
+function stopAll() {
+  if (playSrc) { playSrc.onended=null; try{playSrc.stop();}catch(e){} playSrc.disconnect(); playSrc=null; }
+  playing=false; playOff=0;
+  cancelAnimationFrame(playAnimId);
+  stopLoop(); updPlayUI(); drawWF();
+}
+
+function updPlayUI() {
+  const btn = document.getElementById('btn-play');
+  if (btn) {
+    btn.textContent = playing ? '⏸ 一時停止' : '▶ 再生';
+    btn.classList.toggle('play-active', playing);
+  }
+}
+
+// Get approximate source time for playhead
+function getPlaySrcTime() {
+  if (!playing || !actx || !playBuf) return -1;
+  const mixT = Math.min(playBuf.duration, (actx.currentTime - playAt) + playOff);
+  // Map mix time → source time: walk segments
+  let cumOut = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const segD  = segs[i].e - segs[i].s;
+    const xfD   = (i < juncs.length && juncs[i].type!=='cut') ? juncs[i].ms/1000 : 0;
+    const segIn = cumOut;
+    const segOut= cumOut + segD;
+    if (mixT < segOut || i === segs.length-1) {
+      return segs[i].s + Math.min(segD, mixT - segIn);
+    }
+    cumOut += segD - xfD;
+  }
+  return -1;
+}
+
+// Preview single segment
+async function previewSeg(i) {
+  if (!abuf || i >= segs.length) return;
+  await ensureCtx(); stopAll();
+  const sg = segs[i];
+  const src = actx.createBufferSource();
+  src.buffer = abuf; src.connect(actx.destination);
+  src.start(0, sg.s, sg.e - sg.s);
+  playSrc = src; playing = true; playAt = actx.currentTime; playOff = 0;
+  src.onended = () => { playing=false; playSrc=null; updPlayUI(); drawWF(); };
+  updPlayUI();
+  cancelAnimationFrame(playAnimId);
+  (function loop(){ if(!playing) return; drawWF(); playAnimId=requestAnimationFrame(loop); })();
+}
+
+// ════════════════════════════════════════════
+//  LOOP (JUNCTION PREVIEW)
+// ════════════════════════════════════════════
+async function toggleLoop() {
+  if (looping) { stopLoop(); return; }
+  if (segs.length < 2) { alert('区間が2つ以上必要です'); return; }
+  await ensureCtx(); stopAll();
+  showOv('継ぎ目プレビューを生成中...');
+  let lb;
+  try { lb = await renderJunctionPreview(aJunc); } catch(e) { hideOv(); alert('エラー: '+e.message); return; }
+  hideOv();
+  looping = true;
+  document.getElementById('btn-loop').classList.add('loop-on');
+
+  function playOnce() {
+    if (!looping) return;
+    loopSrc = actx.createBufferSource();
+    loopSrc.buffer = lb; loopSrc.connect(actx.destination);
+    loopSrc.onended = playOnce;
+    loopSrc.start();
+  }
+  playOnce();
+}
+
+function stopLoop() {
+  looping = false;
+  if (loopSrc) { loopSrc.onended=null; try{loopSrc.stop();}catch(e){} loopSrc.disconnect(); loopSrc=null; }
+  const btn = document.getElementById('btn-loop');
+  if (btn) btn.classList.remove('loop-on');
+}
+
+// ════════════════════════════════════════════
+//  ZERO-CROSSING SNAP
+// ════════════════════════════════════════════
+function findZC(sampleIdx) {
+  if (!abuf) return sampleIdx;
+  const data = abuf.getChannelData(0);
+  const rad  = Math.floor(abuf.sampleRate * 0.1); // ±100ms
+  const lo   = Math.max(0, sampleIdx - rad);
+  const hi   = Math.min(data.length - 2, sampleIdx + rad);
+  let best = sampleIdx, bDist = Infinity;
+  for (let i = lo; i < hi; i++) {
+    if ((data[i] >= 0 && data[i+1] < 0) || (data[i] < 0 && data[i+1] >= 0)) {
+      const d = Math.abs(i - sampleIdx);
+      if (d < bDist) { bDist = d; best = i; }
+    }
+  }
+  return best;
+}
+
+function snapZero() {
+  if (!abuf || segs.length < 2) { alert('区間が2つ以上必要です'); return; }
+  const ji = aJunc;
+  const sr = abuf.sampleRate;
+
+  const lSi = Math.floor(segs[ji].e   * sr);
+  const rSi = Math.floor(segs[ji+1].s * sr);
+  const lSn = findZC(lSi);
+  const rSn = findZC(rSi);
+
+  segs[ji].e     = lSn / sr;
+  segs[ji+1].s   = rSn / sr;
+
+  playBuf = null;
+  const moved = Math.round((Math.abs(lSn-lSi) + Math.abs(rSn-rSi)) / sr * 1000);
+  drawWF(); drawJC(); updateSL(); updateTD();
+  alert(`ゼロクロッシングにスナップしました（調整量: ${moved}ms 以内）`);
+}
+
+// ════════════════════════════════════════════
+//  UI UPDATES
+// ════════════════════════════════════════════
+function updateTD() {
+  const od   = outDur();
+  const diff = od - TARGET;
+  document.getElementById('time-cur').textContent = fmtTP(od);
+  const pct = Math.min(105, (od / TARGET) * 100);
+  const pf  = document.getElementById('prog-fill');
+  pf.style.width   = Math.min(100, pct) + '%';
+  pf.className     = diff > 2 ? 'over' : '';
+
+  const bd = document.getElementById('time-badge');
+  if (Math.abs(diff) < 0.5) {
+    bd.textContent = '✓ OK'; bd.className = 'ok';
+  } else if (diff > 0) {
+    bd.textContent = `+${diff.toFixed(1)}秒 超過`; bd.className = 'time-badge over';
+  } else {
+    bd.textContent = `${diff.toFixed(1)}秒 不足`; bd.className = 'time-badge under';
+  }
+}
+
+function updateSL() {
+  const empty   = document.getElementById('seg-empty');
+  const list    = document.getElementById('seg-list');
+  const sum     = document.getElementById('seg-sum');
+
+  if (!segs.length) {
+    empty.style.display = 'block'; list.innerHTML = ''; sum.style.display='none'; return;
+  }
+  empty.style.display = 'none';
+
+  const nums = '①②③④⑤⑥⑦⑧⑨⑩';
+  list.innerHTML = segs.map((sg,i) => {
+    const dur = (sg.e - sg.s).toFixed(1);
+    const hasNext = i < segs.length-1;
+    const junc = juncs[i] || null;
+    return `<div class="si">
+      <span class="si-n">${nums[i]||i+1}</span>
+      <span class="si-range">${fmtT(sg.s)} → ${fmtT(sg.e)}</span>
+      <span class="si-dur">${dur}秒</span>
+      <div class="si-acts">
+        <button class="sib" onclick="previewSeg(${i})" title="試聴">▶</button>
+        ${hasNext ? `<button class="sib jb" onclick="openJunc(${i})" title="継ぎ目${i+1}→${i+2}を編集">✂ ${i+1}→${i+2}</button>` : ''}
+        <button class="sib db" onclick="delSeg(${i})" title="削除">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const od  = outDur();
+  const raw = totalRaw();
+  const xft = Math.max(0, raw - od);
+  sum.style.display = 'flex';
+  sum.innerHTML = `<span>合計 <strong>${fmtTP(od)}</strong></span>
+    ${xft > 0.01 ? `<span style="font-size:10px;color:var(--text2)">（XF ${xft.toFixed(2)}秒分を除く）</span>` : ''}
+    <span style="margin-left:auto;font-size:11px;color:var(--text2)">${segs.length}区間</span>`;
+}
+
+function updateJP() {
+  const empty = document.getElementById('j-empty');
+  const main  = document.getElementById('j-main');
+  if (segs.length < 2) {
+    empty.style.display = 'block'; main.style.display = 'none'; return;
+  }
+  empty.style.display = 'none'; main.style.display = 'block';
+
+  // Selector buttons
+  const sel = document.getElementById('jsel');
+  sel.innerHTML = '<span class="jsel-lbl">継ぎ目：</span>';
+  for (let i = 0; i < segs.length-1; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'jsbtn' + (i===aJunc ? ' active' : '');
+    btn.textContent = `${i+1}→${i+2}`;
+    btn.onclick = () => setAJunc(i);
+    sel.appendChild(btn);
+  }
+
+  // Controls
+  const j = juncs[aJunc] || {type:'xf', ms:100};
+  document.querySelectorAll('input[name="jt"]').forEach(r => r.checked = r.value === j.type);
+  const sl = document.getElementById('xf-sl');
+  const vl = document.getElementById('xf-val');
+  if (sl && vl) { sl.value = j.ms; vl.textContent = j.ms+'ms'; sl.disabled = j.type==='cut'; }
+
+  szCv(jcCv); drawJC();
+}
+
+function setAJunc(i) {
+  aJunc = i;
+  document.querySelectorAll('.jsbtn').forEach((b,idx) => b.classList.toggle('active', idx===i));
+  const j = juncs[i] || {type:'xf', ms:100};
+  document.querySelectorAll('input[name="jt"]').forEach(r => r.checked = r.value===j.type);
+  const sl = document.getElementById('xf-sl'), vl = document.getElementById('xf-val');
+  if (sl&&vl) { sl.value = j.ms; vl.textContent = j.ms+'ms'; sl.disabled = j.type==='cut'; }
+  stopLoop(); drawJC();
+}
+
+function openJunc(i) {
+  aJunc = i;
+  const tabBtn = document.querySelector('.tab[data-p="junc"]');
+  showP('junc', tabBtn);
+  updateJP();
+}
+
+// ── Junction controls ──
+function setJType(t) {
+  if (!juncs[aJunc]) return;
+  juncs[aJunc].type = t;
+  const sl = document.getElementById('xf-sl'); if(sl) sl.disabled = t==='cut';
+  playBuf = null; drawJC(); updateTD(); updateSL();
+}
+
+function setXF(v) {
+  if (!juncs[aJunc]) return;
+  juncs[aJunc].ms = parseInt(v);
+  document.getElementById('xf-val').textContent = v+'ms';
+  playBuf = null; drawJC(); updateTD(); updateSL();
+}
+
+function applyXF(v) {
+  const sl = document.getElementById('xf-sl'); if(sl) sl.value = v;
+  setXF(v);
+}
+
+// ════════════════════════════════════════════
+//  PANEL SWITCHING
+// ════════════════════════════════════════════
+function showP(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  const panel = document.getElementById('panel-'+name);
+  if (panel) panel.classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (name === 'junc') { setTimeout(() => { szCv(jcCv); drawJC(); }, 50); }
+}
+
+// ════════════════════════════════════════════
+//  EXPORT
+// ════════════════════════════════════════════
+async function doExport(fmt) {
+  if (!abuf || !segs.length) { alert('区間が選択されていません'); return; }
+  showOv('ミックスをレンダリング中...');
+  let rendered;
+  try { rendered = await renderMix(); } catch(e) { hideOv(); alert('エラー: '+e.message); return; }
+
+  if (fmt === 'wav') {
+    showOv('WAVエンコード中...');
+    try {
+      const wav = mkWAV(rendered);
+      dlBlob(new Blob([wav], {type:'audio/wav'}), fName+'_freestyle.wav');
+    } catch(e) { alert('WAV生成エラー: '+e.message); }
+  } else {
+    if (typeof lamejs === 'undefined') {
+      hideOv();
+      alert('lamejsが読み込まれていません。\nインターネット接続を確認してください。\nWAV形式でお試しください。');
+      return;
+    }
+    showOv('MP3エンコード中（しばらくお待ちください）...');
+    const br = parseInt(document.getElementById('br-sel').value);
+    try {
+      const mp3 = mkMP3(rendered, br);
+      dlBlob(mp3, fName+'_freestyle.mp3');
+    } catch(e) { alert('MP3生成エラー: '+e.message); }
+  }
+  hideOv();
+}
+
+function mkWAV(buf) {
+  const nch = buf.numberOfChannels, sr = buf.sampleRate, len = buf.length;
+  const bps = 2, ba = nch*bps, dSize = len*nch*bps;
+  const out = new ArrayBuffer(44+dSize); const v = new DataView(out);
+  const ws = (off,s) => { for(let i=0;i<s.length;i++) v.setUint8(off+i,s.charCodeAt(i)); };
+  ws(0,'RIFF'); v.setUint32(4,36+dSize,true); ws(8,'WAVE'); ws(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,nch,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*ba,true);
+  v.setUint16(32,ba,true); v.setUint16(34,16,true);
+  ws(36,'data'); v.setUint32(40,dSize,true);
+  let off = 44;
+  for (let i=0;i<len;i++) for(let c=0;c<nch;c++) {
+    const s = Math.max(-1,Math.min(1,buf.getChannelData(c)[i]));
+    v.setInt16(off, s<0?s*0x8000:s*0x7FFF, true); off+=2;
+  }
+  return out;
+}
+
+function mkMP3(buf, bitrate) {
+  const nch = buf.numberOfChannels, sr = buf.sampleRate, len = buf.length;
+  const enc = new lamejs.Mp3Encoder(nch, sr, bitrate);
+  const BLOCK = 1152, parts = [];
+  const to16 = ch => {
+    const f = buf.getChannelData(ch), i = new Int16Array(f.length);
+    for(let k=0;k<f.length;k++) i[k]=Math.max(-32768,Math.min(32767,f[k]*32767));
+    return i;
+  };
+  const l16 = to16(0), r16 = nch>1?to16(1):l16;
+  for (let i=0;i<len;i+=BLOCK) {
+    const lc = l16.subarray(i,i+BLOCK), rc = r16.subarray(i,i+BLOCK);
+    const mp3buf = nch>1 ? enc.encodeBuffer(lc,rc) : enc.encodeBuffer(lc);
+    if(mp3buf.length>0) parts.push(new Int8Array(mp3buf));
+  }
+  const fin = enc.flush(); if(fin.length>0) parts.push(new Int8Array(fin));
+  return new Blob(parts, {type:'audio/mp3'});
+}
+
+function dlBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+}
+
+// ════════════════════════════════════════════
+//  UTILITIES
+// ════════════════════════════════════════════
+function fmtT(s) {
+  if (isNaN(s)||s<0) return '0:00.0';
+  const m = Math.floor(s/60);
+  const ss = (s%60).toFixed(1).padStart(4,'0');
+  return `${m}:${ss}`;
+}
+
+function fmtTP(s) {  // high precision for time display
+  if (isNaN(s)||s<0) return '0:00.0';
+  const m = Math.floor(s/60);
+  const ss = (s%60).toFixed(1).padStart(4,'0');
+  return `${m}:${ss}`;
+}
+
+function fmtD(s) {
+  const m = Math.floor(s/60), ss = Math.floor(s%60).toString().padStart(2,'0');
+  return `${m}:${ss}`;
+}
+
+function showOv(msg) {
+  document.getElementById('ov-msg').textContent = msg;
+  document.getElementById('overlay').classList.remove('hidden');
+}
+function hideOv() { document.getElementById('overlay').classList.add('hidden'); }
+
+</script>
+</body>
+</html>
