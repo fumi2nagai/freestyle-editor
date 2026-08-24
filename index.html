@@ -120,6 +120,14 @@ body{
   color:var(--text);cursor:pointer;font-size:12px;
 }
 .wfbtn:hover{background:var(--bg4)}
+.wfbtn:disabled{opacity:.35;cursor:default;pointer-events:none}
+/* 保存バッジ */
+#save-badge{
+  font-size:10px;padding:2px 7px;border-radius:8px;
+  white-space:nowrap;margin-left:2px;
+}
+#save-badge.unsaved{background:var(--amber-a15);color:var(--amber)}
+#save-badge.saved{background:rgba(60,185,106,.15);color:var(--green)}
 #zoom-lbl{font-size:11px;color:var(--text2);min-width:28px;text-align:center}
 #wf-hint{font-size:10px;color:var(--text2);margin-left:auto}
 
@@ -161,6 +169,15 @@ body{
   border:1px solid var(--border);border-radius:8px;
 }
 .si:hover{border-color:var(--border2)}
+/* ロック中区間 */
+.si.si-lk{border-color:rgba(91,141,238,.4);background:rgba(91,141,238,.05)}
+.si.si-lk:hover{border-color:rgba(91,141,238,.6)}
+.si.si-lk .si-n{background:rgba(91,141,238,.18);color:var(--blue)}
+/* ロックボタン */
+.sib.lkb{color:var(--text2)}
+.sib.lkb.lk-on{border-color:var(--blue);color:var(--blue);background:rgba(91,141,238,.12)}
+/* ロック中の操作無効ボタン */
+.si.si-lk .sib.db{opacity:.28;pointer-events:none;cursor:default}
 .si-n{
   width:22px;height:22px;border-radius:50%;
   background:var(--teal-a15);color:var(--teal);
@@ -494,6 +511,9 @@ select{cursor:pointer}
       <button class="wfbtn" onclick="chgZoom(-1)" aria-label="ズームアウト">−</button>
       <span id="zoom-lbl">1×</span>
       <button class="wfbtn" onclick="chgZoom(1)" aria-label="ズームイン">＋</button>
+      <button class="wfbtn" id="btn-undo" onclick="undo()" disabled title="元に戻す (Ctrl+Z)">↩ Undo</button>
+      <button class="wfbtn" id="btn-save" onclick="saveState()" disabled title="編集を保存">💾 保存</button>
+      <span id="save-badge"></span>
       <button class="wfbtn" id="mode-btn" onclick="toggleScrollMode()" title="タップモード切替">✏️ 描画</button>
       <button class="wfbtn" onclick="resetView()">全体</button>
       <button class="wfbtn" onclick="clearAll()">全削除</button>
@@ -636,6 +656,102 @@ let looping = false;
 let drag = null;
 let tapStart = null;   // {x, time} — tap vs drag 判定用
 let skDragging = false;
+
+// ════════════════════════════════════════════
+//  UNDO STACK & SAVE STATE
+// ════════════════════════════════════════════
+const undoStack = [];
+const UNDO_MAX  = 30;
+let isSaved = true; // 初期状態は "保存済み"（まだ何も編集していない）
+
+// 現在の segs/juncs を Undo スタックに積む（各編集操作の冒頭で呼ぶ）
+function pushUndo() {
+  undoStack.push({
+    segs:  segs.map(sg => ({...sg})),
+    juncs: juncs.map(j  => ({...j}))
+  });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  updateUndoBtn();
+}
+
+// 一つ前の状態に戻す
+function undo() {
+  if (!undoStack.length) return;
+  const state = undoStack.pop();
+  segs  = state.segs;
+  juncs = state.juncs;
+  aJunc = Math.min(aJunc, Math.max(0, segs.length - 2));
+  playBuf = null;
+  updateUndoBtn();
+  markUnsaved();
+  drawWF(); drawScrollStrip(); updateSL(); updateTD(); updateJP();
+}
+
+function updateUndoBtn() {
+  const btn = document.getElementById('btn-undo');
+  if (btn) btn.disabled = undoStack.length === 0;
+}
+
+// 編集後に呼ぶ — 「未保存」状態に更新
+function markUnsaved() {
+  isSaved = false;
+  const badge = document.getElementById('save-badge');
+  const sBtn  = document.getElementById('btn-save');
+  if (badge) { badge.textContent = '● 未保存'; badge.className = 'unsaved'; }
+  if (sBtn)  sBtn.disabled = false;
+}
+
+// ── localStorage ラッパー ──
+function lsGet(key)      { try { return localStorage.getItem(key); }      catch(e) { return null; } }
+function lsSet(key, val) { try { localStorage.setItem(key, val); return true; } catch(e) { return false; } }
+
+function getSaveKey() {
+  if (!abuf) return null;
+  return `freestyle_v1_${fName}_${Math.round(abuf.duration)}`;
+}
+
+// 手動保存
+function saveState() {
+  const key = getSaveKey();
+  if (!key) return;
+  const data = JSON.stringify({
+    v: 1, fName, duration: abuf.duration,
+    segs:  segs.map(sg => ({...sg})),
+    juncs: juncs.map(j  => ({...j})),
+    savedAt: new Date().toLocaleString('ja-JP')
+  });
+  if (lsSet(key, data)) {
+    isSaved = true;
+    const badge = document.getElementById('save-badge');
+    const sBtn  = document.getElementById('btn-save');
+    if (badge) { badge.textContent = '✓ 保存済み'; badge.className = 'saved'; }
+    if (sBtn)  sBtn.disabled = true;
+  } else {
+    alert('保存に失敗しました（プライベートブラウズでは利用できません）');
+  }
+}
+
+// ファイル読み込み時に前回の保存データを確認・復元
+function tryRestoreState() {
+  const key = getSaveKey();
+  if (!key) return;
+  const raw = lsGet(key);
+  if (!raw) return;
+  try {
+    const state = JSON.parse(raw);
+    if (!confirm(`前回の保存データがあります（${state.savedAt}）\n復元しますか？`)) return;
+    segs  = (state.segs  || []).map(sg => ({s:sg.s, e:sg.e, locked: !!sg.locked}));
+    juncs = (state.juncs || []).map(j  => ({...j}));
+    rebuildJuncs();
+    aJunc = 0;
+    // 復元後は「保存済み」扱い
+    isSaved = true;
+    const badge = document.getElementById('save-badge');
+    const sBtn  = document.getElementById('btn-save');
+    if (badge) { badge.textContent = '✓ 保存済み'; badge.className = 'saved'; }
+    if (sBtn)  sBtn.disabled = true;
+  } catch(e) { console.warn('Restore failed:', e); }
+}
 // drag = {mode:'new', t0, t1}
 // drag = {mode:'rs'|'re', si, startX}  (resize start|end of segment si)
 
@@ -696,8 +812,10 @@ window.addEventListener('DOMContentLoaded', () => {
   // Keyboard shortcuts
   document.addEventListener('keydown', e => {
     if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
-    if (e.key === ' ')      { e.preventDefault(); togglePlay(); }
-    if (e.key === 'Escape') { stopAll(); }
+    if (e.key === ' ')                            { e.preventDefault(); togglePlay(); }
+    if (e.key === 'Escape')                       { stopAll(); }
+    if (e.key === 'z' && (e.ctrlKey||e.metaKey)) { e.preventDefault(); undo(); }
+    if (e.key === 's' && (e.ctrlKey||e.metaKey)) { e.preventDefault(); saveState(); }
   });
 
   // Resize
@@ -753,10 +871,25 @@ async function loadFile(file) {
     return;
   }
 
-  // Reset state
+  // Reset edit state
   segs = []; juncs = []; aJunc = 0;
   zoom = 1; zIdx = 2; scroll = 0;
   stopAll(); playBuf = null;
+  undoStack.length = 0; // Undo履歴をクリア
+  updateUndoBtn();
+
+  // 前回の保存データを確認・復元（同じファイル名+長さが一致する場合）
+  tryRestoreState();
+
+  // 復元しなかった場合も含め、保存ボタン初期化
+  const initBadge = document.getElementById('save-badge');
+  const initSBtn  = document.getElementById('btn-save');
+  if (!segs.length) {
+    // 復元なし → 未保存なし（まだ何も編集していない）
+    if (initBadge) { initBadge.textContent = ''; initBadge.className = ''; }
+    if (initSBtn)  initSBtn.disabled = true;
+    isSaved = true;
+  }
 
   // Show editor
   document.getElementById('drop-zone').style.display = 'none';
@@ -816,12 +949,12 @@ function clampT(t) { return Math.max(0, Math.min(abuf ? abuf.duration : 0, t)); 
 function hitTest(x, tol) {
   const TOL = tol ?? (navigator.maxTouchPoints > 0 ? 18 : 9);
   for (let i = 0; i < segs.length; i++) {
+    if (segs[i].locked) continue;   // ロック中は当たり判定をスキップ
     const x1 = t2px(segs[i].s);
     const x2 = t2px(segs[i].e);
     if (Math.abs(x - x1) <= TOL) return {mode:'rs', si:i};
     if (Math.abs(x - x2) <= TOL) return {mode:'re', si:i};
-    // 区間の内側 → 移動モード（端のTOLより内側のみ）
-    if (x > x1 + TOL && x < x2 - TOL) return {mode:'mv', si:i};
+    // 区間内部は移動なし（誤操作防止のため削除）
   }
   return {mode:'new'};
 }
@@ -852,9 +985,9 @@ function drawWF() {
     const lo = peaks.mn[pi];
     const yT = yC - hi * yC * 0.92;
     const yB = yC - lo * yC * 0.92;
-    const inS = segs.some(sg => t >= sg.s && t <= sg.e);
-    cx.fillStyle = inS ? '#1db87d' : '#1e2438';
-    cx.globalAlpha = inS ? 0.75 : 0.4;
+    const ms = segs.find(sg => t >= sg.s && t <= sg.e); // matching segment
+    cx.fillStyle = ms ? (ms.locked ? '#5b8dee' : '#1db87d') : '#1e2438';
+    cx.globalAlpha = ms ? 0.75 : 0.4;
     cx.fillRect(x, yT, 1, Math.max(1, yB - yT));
   }
   cx.globalAlpha = 1;
@@ -864,34 +997,45 @@ function drawWF() {
     const x1 = t2px(sg.s), x2 = t2px(sg.e);
     if (x2 < 0 || x1 > W) return;
     const cx1 = Math.max(0, x1), cx2 = Math.min(W, x2);
+    const clr = sg.locked ? '#5b8dee' : '#1db87d'; // ロック=青、通常=teal
 
     // Faint fill
-    cx.fillStyle = 'rgba(29,184,125,.06)';
+    cx.fillStyle = sg.locked ? 'rgba(91,141,238,.07)' : 'rgba(29,184,125,.06)';
     cx.fillRect(cx1, 0, cx2-cx1, H);
 
-    // Handles
+    // Handles（ロック中はグリップなし・薄く表示）
     if (x1 >= -2 && x1 <= W+2) {
-      cx.fillStyle = '#1db87d';
+      cx.fillStyle = clr;
+      cx.globalAlpha = sg.locked ? 0.35 : 1;
       cx.fillRect(x1-1, 0, 3, H);
-      // Triangle grip
-      cx.fillStyle = '#3fd89a';
-      cx.beginPath();
-      cx.moveTo(x1+2, 4); cx.lineTo(x1+8, 10); cx.lineTo(x1+2, 16);
-      cx.fill();
+      if (!sg.locked) {
+        cx.globalAlpha = 1;
+        cx.fillStyle = '#3fd89a';
+        cx.beginPath();
+        cx.moveTo(x1+2, 4); cx.lineTo(x1+8, 10); cx.lineTo(x1+2, 16);
+        cx.fill();
+      }
+      cx.globalAlpha = 1;
     }
     if (x2 >= -2 && x2 <= W+2) {
-      cx.fillStyle = '#1db87d';
+      cx.fillStyle = clr;
+      cx.globalAlpha = sg.locked ? 0.35 : 1;
       cx.fillRect(x2-1, 0, 3, H);
-      cx.fillStyle = '#3fd89a';
-      cx.beginPath();
-      cx.moveTo(x2-2, 4); cx.lineTo(x2-8, 10); cx.lineTo(x2-2, 16);
-      cx.fill();
+      if (!sg.locked) {
+        cx.globalAlpha = 1;
+        cx.fillStyle = '#3fd89a';
+        cx.beginPath();
+        cx.moveTo(x2-2, 4); cx.lineTo(x2-8, 10); cx.lineTo(x2-2, 16);
+        cx.fill();
+      }
+      cx.globalAlpha = 1;
     }
 
-    // Segment number
-    cx.fillStyle = '#1db87d';
+    // ラベル（ロック中は🔒アイコンを前置）
+    cx.fillStyle = clr;
     cx.font = 'bold 10px monospace';
-    cx.fillText(i+1, Math.max(cx1+5, 3), 13);
+    const lbl = sg.locked ? `🔒${i+1}` : `${i+1}`;
+    cx.fillText(lbl, Math.max(cx1+5, 3), 13);
 
     // Junction marker
     if (i < segs.length-1) {
@@ -1099,10 +1243,9 @@ function wfDown(e) {
 
   if (ht.mode === 'new') {
     drag = {mode:'new', t0:t, t1:t};
-  } else if (ht.mode === 'mv') {
-    drag = {mode:'mv', si:ht.si, startT:t, origS:segs[ht.si].s, origE:segs[ht.si].e};
-    wfCv.style.cursor = 'grabbing';
   } else {
+    // リサイズ開始前に Undo スナップショットを保存
+    pushUndo();
     drag = {mode:ht.mode, si:ht.si, startX:x};
   }
 }
@@ -1115,25 +1258,14 @@ function wfMove(e) {
 
   if (!drag) {
     const ht = hitTest(x);
-    if      (ht.mode === 'mv')  wfCv.style.cursor = 'grab';
-    else if (ht.mode !== 'new') wfCv.style.cursor = 'ew-resize';
-    else                        wfCv.style.cursor = 'crosshair';
+    wfCv.style.cursor = ht.mode !== 'new' ? 'ew-resize' : 'crosshair';
     drawWF(); return;
   }
 
   if (drag.mode === 'new') {
     drag.t1 = t;
-  } else if (drag.mode === 'mv') {
-    // 区間全体を平行移動（sortMergeはmouseup時のみ）
-    const delta = t - drag.startT;
-    const dur   = drag.origE - drag.origS;
-    const newS  = Math.max(0, Math.min(abuf.duration - dur, drag.origS + delta));
-    segs[drag.si].s = newS;
-    segs[drag.si].e = newS + dur;
-    playBuf = null;
-    updateSL(); updateTD();
   } else {
-    // リサイズ
+    // リサイズ（rs / re）
     const sg = segs[drag.si];
     if (drag.mode === 'rs') {
       segs[drag.si].s = Math.min(t, sg.e - 0.05);
@@ -1155,20 +1287,17 @@ function wfUp(e) {
   if (drag.mode === 'new') {
     const s  = Math.min(drag.t0, drag.t1);
     const en = Math.max(drag.t0, drag.t1);
-    // タップ判定：移動 < 6px かつ 時間 < 350ms → シーク
     const moved   = tapStart ? Math.abs(x - tapStart.x) : 99;
     const elapsed = tapStart ? Date.now() - tapStart.time : 999;
     if (moved < 6 && elapsed < 350) {
-      seekTo(clampT(px2t(x)));
+      seekTo(clampT(px2t(x)));   // タップ → シーク
     } else if (en - s > 0.08) {
-      addSeg(s, en);
+      addSeg(s, en);              // ドラッグ → 区間追加
     }
-  } else if (drag.mode === 'mv') {
-    // 移動確定：重複があればマージ
-    sortMerge(); rebuildJuncs(); playBuf = null;
-    updateSL(); updateTD(); updateJP();
+  } else {
+    // rs/re リサイズ完了 → 未保存マーク
+    markUnsaved();
   }
-  // rs/re は wfMove 中に sortMerge 済み
 
   tapStart = null;
   drag = null;
@@ -1187,7 +1316,10 @@ function wfRClick(e) {
   const x = getX(e);
   const t = px2t(x);
   const i = segs.findIndex(sg => t >= sg.s && t <= sg.e);
-  if (i >= 0 && confirm(`区間 ${i+1} を削除しますか？`)) delSeg(i);
+  if (i >= 0) {
+    if (segs[i].locked) { alert(`区間 ${i+1} は🔒ロック中です`); return; }
+    if (confirm(`区間 ${i+1} を削除しますか？`)) delSeg(i);
+  }
 }
 
 function wfWheel(e) {
@@ -1264,25 +1396,25 @@ function wfTouchStart(e) {
   // Check handle hit with wider tolerance for touch
   const ht = hitTest(tx, 22);
   if (ht.mode !== 'new') {
-    const t = clampT(px2t(tx));
-    if (ht.mode === 'mv') {
-      drag = {mode:'mv', si:ht.si, startT:t, origS:segs[ht.si].s, origE:segs[ht.si].e};
-    } else {
-      drag = {mode: ht.mode, si: ht.si, startX: tx};
-    }
+    // リサイズ開始前に Undo スナップショットを保存
+    pushUndo();
+    drag = {mode: ht.mode, si: ht.si, startX: tx};
     clearLP(); return;
   }
 
-  // Potential new segment — arm long-press for delete
   const t = px2t(tx);
   const si = segs.findIndex(sg => t >= sg.s && t <= sg.e);
   if (si >= 0) {
     lpTimer = setTimeout(() => {
       drag = null;
-      showLPToast(`区間 ${si+1} を長押し削除`);
-      setTimeout(() => {
-        if (confirm(`区間 ${si+1} を削除しますか？`)) delSeg(si);
-      }, 100);
+      if (segs[si] && segs[si].locked) {
+        showLPToast(`🔒 区間 ${si+1} はロック中`);
+      } else {
+        showLPToast(`区間 ${si+1} を長押し削除`);
+        setTimeout(() => {
+          if (confirm(`区間 ${si+1} を削除しますか？`)) delSeg(si);
+        }, 100);
+      }
     }, 550);
   }
 
@@ -1382,25 +1514,44 @@ function resetView() {
 //  SEGMENT OPERATIONS
 // ════════════════════════════════════════════
 function addSeg(s, e) {
-  segs.push({s, e});
+  // ロック中区間に重なる場合は追加不可
+  if (segs.some(sg => sg.locked && s < sg.e && e > sg.s)) {
+    alert('🔒 ロック中の区間と重なるため追加できません'); return;
+  }
+  pushUndo();
+  segs.push({s, e, locked: false});
   sortMerge(); rebuildJuncs(); playBuf = null;
+  markUnsaved();
   drawWF(); drawScrollStrip(); updateSL(); updateTD(); updateJP();
 }
 
 function delSeg(i) {
+  if (segs[i] && segs[i].locked) {
+    alert('🔒 ロック中の区間は削除できません\n区間一覧の 🔓 ボタンで解除してください'); return;
+  }
+  pushUndo();
   segs.splice(i, 1);
   juncs = juncs.slice(0, Math.max(0, segs.length-1));
   rebuildJuncs();
   aJunc = Math.min(aJunc, Math.max(0, segs.length-2));
   playBuf = null;
+  markUnsaved();
   drawWF(); drawScrollStrip(); updateSL(); updateTD(); updateJP();
 }
 
 function clearAll() {
   if (!abuf) return;
-  if (segs.length > 0 && !confirm('すべての区間を削除しますか？')) return;
-  segs = []; juncs = []; aJunc = 0; playBuf = null;
-  stopAll(); drawWF(); updateSL(); updateTD(); updateJP();
+  const hasLocked = segs.some(s => s.locked);
+  const msg = hasLocked
+    ? 'ロックされていない区間を削除しますか？\n（🔒ロック中の区間は保護されます）'
+    : 'すべての区間を削除しますか？';
+  if (segs.length > 0 && !confirm(msg)) return;
+  pushUndo();
+  segs = segs.filter(s => s.locked); // ロック中は残す
+  juncs = []; aJunc = 0; playBuf = null;
+  sortMerge(); // 残ったロック区間のjuncs再構築
+  stopAll(); markUnsaved();
+  drawWF(); drawScrollStrip(); updateSL(); updateTD(); updateJP();
 }
 
 function sortMerge() {
@@ -1408,7 +1559,10 @@ function sortMerge() {
   const merged = [];
   segs.forEach(sg => {
     const last = merged[merged.length-1];
-    if (last && sg.s <= last.e) { last.e = Math.max(last.e, sg.e); }
+    if (last && sg.s <= last.e) {
+      last.e = Math.max(last.e, sg.e);
+      if (sg.locked) last.locked = true; // どちらかがロックなら結果もロック
+    }
     else merged.push({...sg});
   });
   segs = merged;
@@ -1929,17 +2083,16 @@ function snapZero() {
   if (!abuf || segs.length < 2) { alert('区間が2つ以上必要です'); return; }
   const ji = aJunc;
   const sr = abuf.sampleRate;
-
+  pushUndo();
   const lSi = Math.floor(segs[ji].e   * sr);
   const rSi = Math.floor(segs[ji+1].s * sr);
   const lSn = findZC(lSi);
   const rSn = findZC(rSi);
-
   segs[ji].e     = lSn / sr;
   segs[ji+1].s   = rSn / sr;
-
   playBuf = null;
   const moved = Math.round((Math.abs(lSn-lSi) + Math.abs(rSn-rSi)) / sr * 1000);
+  markUnsaved();
   drawWF(); drawJC(); updateSL(); updateTD();
   alert(`ゼロクロッシングにスナップしました（調整量: ${moved}ms 以内）`);
 }
@@ -1966,6 +2119,15 @@ function updateTD() {
   }
 }
 
+// ロックトグル
+function toggleLock(i) {
+  if (i < 0 || i >= segs.length) return;
+  pushUndo();
+  segs[i].locked = !segs[i].locked;
+  markUnsaved();
+  drawWF(); drawScrollStrip(); updateSL();
+}
+
 function updateSL() {
   const empty   = document.getElementById('seg-empty');
   const list    = document.getElementById('seg-list');
@@ -1980,17 +2142,23 @@ function updateSL() {
   list.innerHTML = segs.map((sg,i) => {
     const dur = (sg.e - sg.s).toFixed(1);
     const hasNext = i < segs.length-1;
-    return `<div class="si">
+    const lkClass = sg.locked ? 'si si-lk' : 'si';
+    const lkBtn   = sg.locked
+      ? `<button class="sib lkb lk-on" onclick="toggleLock(${i})" title="ロック解除" aria-label="区間${i+1}のロックを解除">🔒</button>`
+      : `<button class="sib lkb"        onclick="toggleLock(${i})" title="ロック"     aria-label="区間${i+1}をロック">🔓</button>`;
+    return `<div class="${lkClass}">
       <span class="si-n">${nums[i]||i+1}</span>
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">
           <span class="si-range">${fmtT(sg.s)} → ${fmtT(sg.e)}</span>
           <span class="si-dur">${dur}秒</span>
+          ${sg.locked ? '<span style="font-size:10px;color:#5b8dee">🔒 保護中</span>' : ''}
         </div>
       </div>
       <div class="si-acts">
         <button class="sib" onclick="previewSeg(${i})" title="試聴" aria-label="区間${i+1}を試聴">▶</button>
         ${hasNext ? `<button class="sib jb" onclick="openJunc(${i})" aria-label="継ぎ目${i+1}→${i+2}を編集">✂</button>` : ''}
+        ${lkBtn}
         <button class="sib db" onclick="delSeg(${i})" aria-label="区間${i+1}を削除">✕</button>
       </div>
     </div>`;
