@@ -129,6 +129,11 @@ body{
 #save-badge.unsaved{background:var(--amber-a15);color:var(--amber)}
 #save-badge.saved{background:rgba(60,185,106,.15);color:var(--green)}
 #zoom-lbl{font-size:11px;color:var(--text2);min-width:28px;text-align:center}
+/* ズームスライダー */
+#zoom-sl{
+  flex:1;min-width:60px;max-width:110px;height:18px;
+  accent-color:var(--teal);cursor:pointer;vertical-align:middle;
+}
 #wf-hint{font-size:10px;color:var(--text2);margin-left:auto}
 
 #seg-bar{
@@ -322,12 +327,14 @@ select{cursor:pointer}
 }
 @keyframes lpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.7)}}
 
-/* ── SEEKBAR ── */
+/* ── SEEKBAR（常時表示） ── */
 #seekbar{
-  display:none;align-items:center;gap:8px;
+  display:flex;               /* 常時表示 */
+  align-items:center;gap:8px;
   padding:5px 12px;background:var(--bg2);
   border-bottom:1px solid var(--border);flex-shrink:0;
 }
+/* #seekbar.visible は不要になったが互換性のため残す */
 #seekbar.visible{display:flex}
 .sk-t{
   font-family:'Courier New',monospace;font-size:11px;
@@ -391,6 +398,7 @@ select{cursor:pointer}
   #wf-toolbar{padding:5px 8px;gap:5px;flex-wrap:wrap}
   .wfbtn{padding:8px 12px;font-size:13px;min-height:40px;min-width:40px;border-radius:7px}
   #zoom-lbl{font-size:12px;min-width:32px}
+  #zoom-sl{min-width:80px;max-width:150px;height:28px}
   #wf-hint{display:none}            /* replaced by mode button UX */
   #wf-mode-hint{
     display:block;width:100%;
@@ -511,6 +519,9 @@ select{cursor:pointer}
       <button class="wfbtn" onclick="chgZoom(-1)" aria-label="ズームアウト">−</button>
       <span id="zoom-lbl">1×</span>
       <button class="wfbtn" onclick="chgZoom(1)" aria-label="ズームイン">＋</button>
+      <input type="range" id="zoom-sl" min="0" max="8" step="1" value="2"
+             oninput="setZoomIdx(parseInt(this.value))"
+             title="ズーム倍率 (0.25× ～ 64×)" aria-label="ズーム倍率">
       <button class="wfbtn" id="btn-undo" onclick="undo()" disabled title="元に戻す (Ctrl+Z)">↩ Undo</button>
       <button class="wfbtn" id="btn-save" onclick="saveState()" disabled title="編集を保存">💾 保存</button>
       <span id="save-badge"></span>
@@ -622,7 +633,7 @@ select{cursor:pointer}
 // ════════════════════════════════════════════
 const TARGET = 75;          // 1:15.0
 const PKRES  = 8192;        // Peak array resolution
-const ZOOMS  = [0.25,0.5,1,2,4,8,16];
+const ZOOMS  = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64]; // 最大 64×
 let zIdx = 2;               // default 1×
 
 // Audio
@@ -874,6 +885,7 @@ async function loadFile(file) {
   // Reset edit state
   segs = []; juncs = []; aJunc = 0;
   zoom = 1; zIdx = 2; scroll = 0;
+  const sl0 = document.getElementById('zoom-sl'); if (sl0) sl0.value = 2;
   stopAll(); playBuf = null;
   undoStack.length = 0; // Undo履歴をクリア
   updateUndoBtn();
@@ -902,7 +914,9 @@ async function loadFile(file) {
   hideOv();
   setTimeout(() => {
     initSz();
+    playOff = 0; // 再生位置をリセット
     drawWF(); updateRuler(); updateSL(); updateTD(); updateJP(); drawScrollStrip();
+    // updateTD が updateSK を呼ぶので seekbar も更新済み
   }, 30);
 }
 
@@ -1432,10 +1446,7 @@ function wfTouchMove(e) {
     const newZ  = Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length-1], pinch.zoomStart * ratio));
     const best  = ZOOMS.reduce((a,z,i) => Math.abs(z-newZ)<Math.abs(ZOOMS[a]-newZ)?i:a, 0);
 
-    if (best !== zIdx) {
-      zIdx = best; zoom = ZOOMS[zIdx];
-      document.getElementById('zoom-lbl').textContent = zoom + '×';
-    }
+    if (best !== zIdx) _setZoom(best); // ラベル・スライダーも同期
 
     if (abuf) {
       // ピンチ中心のソース時刻が画面上の同じX位置に来るようにscrollを調整
@@ -1491,23 +1502,31 @@ function showLPToast(msg) {
 // ════════════════════════════════════════════
 //  ZOOM & SCROLL
 // ════════════════════════════════════════════
-function chgZoom(dir) {
-  const old = zIdx;
-  zIdx = Math.max(0, Math.min(ZOOMS.length-1, zIdx+dir));
-  if (zIdx === old) return;
+// 内部: ズーム状態を更新（再描画・スクロールクランプなし）
+// ボタン・スライダー・ピンチ全てがここを経由してラベルとスライダーを同期
+function _setZoom(idx) {
+  zIdx = Math.max(0, Math.min(ZOOMS.length - 1, idx));
   zoom = ZOOMS[zIdx];
   document.getElementById('zoom-lbl').textContent = zoom + '×';
+  const sl = document.getElementById('zoom-sl');
+  if (sl && parseInt(sl.value) !== zIdx) sl.value = zIdx;
+}
+
+// 公開API: ズーム変更 + スクロールクランプ + 再描画
+function setZoomIdx(idx) {
+  _setZoom(idx);
   if (abuf) {
     const vd = abuf.duration / zoom;
-    scroll = Math.max(0, Math.min(abuf.duration-vd, scroll));
+    scroll = Math.max(0, Math.min(abuf.duration - vd, scroll));
   }
   drawWF(); updateRuler(); drawScrollStrip();
 }
 
+function chgZoom(dir) { setZoomIdx(zIdx + dir); }
+
 function resetView() {
-  zoom = 1; zIdx = 2;
-  document.getElementById('zoom-lbl').textContent = '1×';
-  scroll = 0; drawWF(); updateRuler(); drawScrollStrip();
+  scroll = 0;
+  setZoomIdx(2); // 1× にリセット（setZoomIdx が再描画まで担当）
 }
 
 // ════════════════════════════════════════════
@@ -1744,20 +1763,36 @@ async function seekTo(srcT) {
 }
 
 // シークバー表示
-function showSK() {
-  const sb = document.getElementById('seekbar');
-  sb.classList.add('visible');
-  if (playBuf) document.getElementById('sk-end').textContent = fmtTP(playBuf.duration);
+// ミックス時刻 → ソース時刻に変換（srcToMixTime の逆関数）
+function mixTimeToSrcTime(mixT) {
+  if (!segs.length) return 0;
+  let cumMix = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const segD = segs[i].e - segs[i].s;
+    const xfD  = (i < juncs.length && juncs[i].type !== 'cut') ? juncs[i].ms/1000 : 0;
+    const segEnd = cumMix + segD;
+    if (mixT <= segEnd || i === segs.length - 1) {
+      return segs[i].s + Math.max(0, Math.min(segD, mixT - cumMix));
+    }
+    cumMix += segD - xfD;
+  }
+  return segs[segs.length - 1].e;
 }
 
-// シークバー更新（アニメーションループから毎フレーム呼ぶ）
+// シークバー表示（常時表示のため visibility 操作不要）
+function showSK() { updateSK(); }
+
+// シークバー更新（playBuf がなくても outDur() で推定値を表示）
 function updateSK() {
-  if (!playBuf) return;
-  const cur = playing
-    ? Math.min(playBuf.duration, (actx.currentTime - playAt) + playOff)
+  const dur = playBuf ? playBuf.duration : outDur();
+  const cur = (playing && actx)
+    ? Math.min(playBuf ? playBuf.duration : dur,
+               (actx.currentTime - playAt) + playOff)
     : playOff;
-  const pct = playBuf.duration > 0 ? (cur / playBuf.duration) * 100 : 0;
+  const pct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0;
+
   document.getElementById('sk-pos').textContent = fmtTP(cur);
+  document.getElementById('sk-end').textContent = dur > 0 ? fmtTP(dur) : '--:--.-';
   document.getElementById('sk-fill').style.width = pct + '%';
   document.getElementById('sk-thumb').style.left = pct + '%';
 }
@@ -1782,12 +1817,19 @@ function skDown(e) {
 }
 
 function skApply(e) {
-  if (!playBuf) return;
-  const r  = document.getElementById('sk-track').getBoundingClientRect();
-  const cx = e.touches ? e.touches[0].clientX : e.clientX;
+  if (!abuf || !segs.length) return;
+  const r    = document.getElementById('sk-track').getBoundingClientRect();
+  const cx   = e.touches ? e.touches[0].clientX : e.clientX;
   const frac = Math.max(0, Math.min(1, (cx - r.left) / r.width));
-  playOff    = frac * playBuf.duration;
 
+  if (!playBuf) {
+    // 未レンダリング: mix時刻を推定 → seekTo() でレンダリング後にシーク
+    const mixT = frac * outDur();
+    seekTo(mixTimeToSrcTime(mixT));
+    return;
+  }
+
+  playOff = frac * playBuf.duration;
   if (playing) {
     if (playSrc) { playSrc.onended=null; try{playSrc.stop();}catch(er){} }
     playSrc = actx.createBufferSource();
@@ -2117,6 +2159,8 @@ function updateTD() {
   } else {
     bd.textContent = `${diff.toFixed(1)}秒 不足`; bd.className = 'time-badge under';
   }
+  // 再生バーの総時間・位置も更新（区間編集のたびに反映）
+  updateSK();
 }
 
 // ロックトグル
